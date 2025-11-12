@@ -121,7 +121,7 @@ class RangingStrategyAnalyzer:
             ).to_dict()
 
         custom_targets = self._build_custom_targets(
-            direction, bb_lower, bb_middle, bb_upper
+            direction, close_price, bb_lower, bb_middle, bb_upper
         )
 
         score_breakdown = self._build_score_breakdown(
@@ -233,9 +233,18 @@ class RangingStrategyAnalyzer:
         return 0.0
 
     def _build_custom_targets(
-        self, direction: str, bb_lower: float, bb_middle: float, bb_upper: float
+        self,
+        direction: str,
+        current_price: float,
+        bb_lower: float,
+        bb_middle: float,
+        bb_upper: float,
     ) -> Dict[str, Dict[str, float]]:
         """Ranging stratejisi için TP/SL hedefleri oluşturur."""
+        band_range = bb_upper - bb_lower
+        if band_range <= 0:
+            return {}
+
         targets = {
             "tp1": {
                 "price": bb_middle,
@@ -252,11 +261,16 @@ class RangingStrategyAnalyzer:
         }
 
         # Stop-loss: band dışına %10 buffer
-        buffer = (bb_upper - bb_lower) * 0.1
+        buffer = band_range * 0.1
+        safety_gap = max(band_range * 0.05, abs(current_price) * 0.001)
+
         if direction == "LONG":
-            stop_price = max(bb_lower - buffer, 0.0)
+            base_stop = bb_lower - buffer
+            stop_price = min(base_stop, current_price - safety_gap)
+            stop_price = max(stop_price, 0.0)
         else:
-            stop_price = bb_upper + buffer
+            base_stop = bb_upper + buffer
+            stop_price = max(base_stop, current_price + safety_gap)
 
         targets["stop_loss"] = {
             "price": stop_price,
