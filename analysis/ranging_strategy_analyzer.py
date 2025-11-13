@@ -40,12 +40,23 @@ class RangingStrategyAnalyzer:
     birleştirerek güven skorunu hesaplar. Ayrıca TP/SL hedefleri üretir.
     """
 
-    def __init__(self, logger_manager: Optional[LoggerManager] = None):
+    def __init__(
+        self,
+        logger_manager: Optional[LoggerManager] = None,
+        min_stop_distance_percent: float = 0.5,
+    ):
         self.logger = (
             logger_manager.get_logger("RangingStrategyAnalyzer")
             if logger_manager
             else LoggerManager().get_logger("RangingStrategyAnalyzer")
         )
+        try:
+            # Yüzdelik değeri orana çevir (örn: 0.5 -> 0.005)
+            ratio = max(float(min_stop_distance_percent), 0.0) / 100.0
+        except (TypeError, ValueError):
+            ratio = 0.005
+        # Minimum %0.1 (0.001) sınırı ile aşırı düşük değerleri engelle
+        self.min_stop_distance_ratio = max(ratio, 0.001)
 
     def generate_signal(
         self, df: pd.DataFrame, indicators: Dict[str, Dict]
@@ -98,8 +109,10 @@ class RangingStrategyAnalyzer:
             )
             return None
 
-        lower_threshold = bb_lower + bb_range * 0.2
-        upper_threshold = bb_upper - bb_range * 0.2
+        # Mean reversion için fiyatın banda çok yakın olması gerekiyor
+        # %10'luk bir alan kullan (önceden %20 idi, çok genişti)
+        lower_threshold = bb_lower + bb_range * 0.1
+        upper_threshold = bb_upper - bb_range * 0.1
 
         bb_bias = self._detect_bollinger_bias(
             close_price, lower_threshold, upper_threshold
@@ -196,8 +209,24 @@ class RangingStrategyAnalyzer:
             return bb_bias, min(confidence, 0.8)
 
         # RSI belirleyici, Bollinger nötr
+        # Mean reversion için fiyatın banda yakın olması gerekiyor
         if rsi_bias in ("LONG", "SHORT") and bb_bias == "NEUTRAL":
+            # Fiyatın banda yakınlığını kontrol et
+            band_range = bb_upper - bb_lower
+            if band_range > 0:
+                normalized_position = (price - bb_lower) / band_range
+                # Fiyat bandın %15'lik alt veya üst bölgesinde olmalı
+                if rsi_bias == "LONG" and normalized_position > 0.15:
+                    # Fiyat alt banda yakın değil, sinyal üretme
+                    return "NEUTRAL", 0.4
+                if rsi_bias == "SHORT" and normalized_position < 0.85:
+                    # Fiyat üst banda yakın değil, sinyal üretme
+                    return "NEUTRAL", 0.4
             confidence = 0.6 + self._rsi_extremity_bonus(rsi_bias, rsi_value)
+            # Fiyat banda yakınsa, proximity bonus ekle
+            confidence += self._band_proximity_bonus(
+                rsi_bias, price, bb_lower, bb_upper
+            )
             return rsi_bias, min(confidence, 0.75)
 
         # Çelişki varsa sinyal üretme
@@ -260,17 +289,33 @@ class RangingStrategyAnalyzer:
             },
         }
 
-        # Stop-loss: band dışına %10 buffer
-        buffer = band_range * 0.1
-        safety_gap = max(band_range * 0.05, abs(current_price) * 0.001)
+        # Stop-loss: band dışına %5 buffer (mean reversion için yakın stop gerekli)
+        # Eğer fiyat bandı kırarsa, sinyal geçersiz demektir - bu yüzden stop yakın olmalı
+        buffer = band_range * 0.05
+        
+        # Minimum stop-loss mesafesi: Normal piyasa gürültüsüne karşı koruma
+        # Mean reversion için yakın ama %0.5'ten az olmamalı
+        # Bu, normal piyasa gürültüsünde yanlış stop-loss olmasını önler
+        min_stop_distance = current_price * self.min_stop_distance_ratio
 
         if direction == "LONG":
+            # LONG için: Stop-loss bandın hemen altında olmalı
+            # Ama giriş fiyatının yanlış tarafında (üstünde) olmamalı
             base_stop = bb_lower - buffer
-            stop_price = min(base_stop, current_price - safety_gap)
+            # Minimum stop-loss mesafesini uygula (piyasa gürültüsüne karşı koruma)
+            min_stop_with_distance = current_price - min_stop_distance
+            # Stop-loss bandın dışında olmalı, ama minimum mesafeyi de korumalı
+            # En yakın stop-loss'u seç (en büyük değer), ama bandın dışında olmalı
+            stop_price = max(base_stop, min_stop_with_distance)
             stop_price = max(stop_price, 0.0)
         else:
+            # SHORT için: Stop-loss bandın hemen üstünde olmalı
+            # Ayrıca bid tarafında kalmalı (giriş fiyatının altına düşmemeli)
             base_stop = bb_upper + buffer
-            stop_price = max(base_stop, current_price + safety_gap)
+            max_stop_with_distance = current_price + min_stop_distance
+            # Stop-loss girişten en az belirlenen yüzde kadar yukarıda olmalı.
+            # Eğer fiyat üst banda aşırı taşmışsa, stop'u daha üste çekmek için max seçiyoruz.
+            stop_price = max(base_stop, max_stop_with_distance)
 
         targets["stop_loss"] = {
             "price": stop_price,

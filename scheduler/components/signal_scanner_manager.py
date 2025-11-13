@@ -30,6 +30,7 @@ class SignalScannerManager:
         signal_repository: Optional[SignalRepository] = None,
         confidence_threshold: float = 0.69,
         cooldown_hours: int = 1,
+        ranging_min_sl_percent: float = 0.5,
         risk_reward_calc: Optional[RiskRewardCalculator] = None,
         signal_tracker: Optional[object] = None  # SignalTracker instance (optional)
     ):
@@ -61,6 +62,7 @@ class SignalScannerManager:
         self.cooldown_seconds = cooldown_hours * 3600
         self.risk_reward_calc = risk_reward_calc  # Risk/Reward calculator
         self.signal_tracker = signal_tracker  # SignalTracker instance (optional, for message updates)
+        self.ranging_min_sl_percent = ranging_min_sl_percent
         
         self.logger = LoggerManager().get_logger('SignalScannerManager')
         
@@ -71,8 +73,11 @@ class SignalScannerManager:
         self.signal_cache: Dict[str, Dict] = {}
         
         self.logger.info(
-            f"SignalScannerManager başlatıldı - "
-            f"threshold={confidence_threshold}, cooldown={cooldown_hours}h"
+            "SignalScannerManager başlatıldı - "
+            "threshold=%s, cooldown=%sh, ranging_min_sl=%s%%",
+            confidence_threshold,
+            cooldown_hours,
+            ranging_min_sl_percent,
         )
 
         # Hibrit cooldown için cache warmup
@@ -716,13 +721,15 @@ class SignalScannerManager:
         tp3_price = _price_for('tp3')
         stop_price = _price_for('stop_loss')
         
+        # Ranging stratejisinde sadece 2 TP ve 1 SL var
+        # SL'yi sadece sl2_price olarak set et (diğerleri None)
         return {
             'tp1_price': tp1_price,
             'tp2_price': tp2_price,
             'tp3_price': tp3_price,
-            'sl1_price': stop_price,
-            'sl1_5_price': stop_price,
-            'sl2_price': stop_price
+            'sl1_price': None,
+            'sl1_5_price': None,
+            'sl2_price': stop_price  # Ranging'de tek SL, sl2 olarak kaydediliyor
         }
     
     def _save_signal_to_db(

@@ -224,17 +224,20 @@ class ApplicationFactory:
             adx_strong_threshold=config.adx_thresholds['strong']
         )
     
-    def _create_ranging_strategy_analyzer(self) -> RangingStrategyAnalyzer:
+    def _create_ranging_strategy_analyzer(self, config: ConfigManager) -> RangingStrategyAnalyzer:
         """Ranging strateji analizörü oluşturur."""
         logger_manager = self.container.get_optional(LoggerManager)
-        return RangingStrategyAnalyzer(logger_manager) if logger_manager else RangingStrategyAnalyzer()
+        min_sl_percent = config.ranging_min_sl_percent
+        if logger_manager:
+            return RangingStrategyAnalyzer(logger_manager, min_stop_distance_percent=min_sl_percent)
+        return RangingStrategyAnalyzer(min_stop_distance_percent=min_sl_percent)
     
     def _create_signal_generator(self, indicator_calc: TechnicalIndicatorCalculator,
                                 volume_analyzer: VolumeAnalyzer,
                                 threshold_manager: AdaptiveThresholdManager,
                                 config: ConfigManager) -> SignalGenerator:
         """Signal generator oluşturur."""
-        ranging_analyzer = self._create_ranging_strategy_analyzer()
+        ranging_analyzer = self._create_ranging_strategy_analyzer(config)
         self.container.register_singleton(RangingStrategyAnalyzer, ranging_analyzer)
         return SignalGenerator(
             indicator_calculator=indicator_calc,
@@ -350,6 +353,7 @@ class ApplicationFactory:
             confidence_threshold=config.confidence_threshold,  # from .env or default 0.69
             cooldown_hours=config.cooldown_hours,  # from .env or default 1
             risk_reward_calc=risk_reward_calc,  # Risk/Reward calculator
+            ranging_min_sl_percent=config.ranging_min_sl_percent,
             signal_tracker=signal_tracker  # SignalTracker instance (optional, for cooldown log updates)
         )
     

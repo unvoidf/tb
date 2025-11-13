@@ -183,6 +183,22 @@ class ConfigManager:
             'backoff_base': 2,
             'initial_delay': 1
         }
+
+    @property
+    def ranging_min_sl_percent(self) -> float:
+        """
+        Ranging stratejisinde minimum stop mesafesi (% olarak).
+
+        .env -> RANGING_MIN_SL_PERCENT (örn: 0.5 -> %0.5, 1 -> %1)
+        """
+        try:
+            val = os.getenv('RANGING_MIN_SL_PERCENT')
+            if val is None:
+                return 0.5
+            parsed = float(val)
+            return max(parsed, 0.1)  # en az %0.1
+        except Exception:
+            return 0.5
     
     @property
     def log_config(self) -> Dict[str, any]:

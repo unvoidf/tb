@@ -631,16 +631,17 @@ class SignalTracker:
         """
         Sinyal kapatılmalı mı kontrol eder.
         
+        Sadece 72 saat kontrolü yapar. TP/SL hit durumları finalize sebebi değildir,
+        çünkü kullanıcı manuel TP/SL yönetimi yapıyor olabilir.
+        
         Args:
             signal: Sinyal dict
             
         Returns:
-            True ise kapatılmalı
+            True ise kapatılmalı (sadece 72 saat geçtiyse)
         """
-        # TP3 veya SL2 hit olduysa
-        if signal.get('tp3_hit') or signal.get('sl2_hit'):
-            return True
-        # 72 saat geçtiyse
+        # Sadece 72 saat kontrolü yap
+        # TP/SL hit durumları finalize sebebi değildir (kullanıcı manuel yönetim yapabilir)
         created_at = signal.get('created_at', 0)
         if int(time.time()) - created_at > 72 * 3600:
             return True

@@ -932,7 +932,9 @@ class MessageFormatter:
                             sl_pct = ((signal_price - stop_price) / signal_price) * 100 if signal_price else 0.0
                     except Exception:
                         sl_pct = 0.0
-                    hit_emoji = "✅" if sl_hits and (sl_hits.get('1') or sl_hits.get('stop')) else "⏳"
+                    # Ranging stratejisinde SL sl2_price olarak kaydediliyor, bu yüzden '2' kontrol et
+                    # SL hit olduğunda ❌ (zarar demek, kötü bir şey)
+                    hit_emoji = "❌" if sl_hits and (sl_hits.get('2') or sl_hits.get('stop')) else "⏳"
                     label = stop_info.get('label', 'Stop-Loss')
                     sl_levels.append(f"   {label}: {fmt_price(stop_price)} ({sl_pct:+.2f}%) {hit_emoji}")
                     if sl_hits:
@@ -975,7 +977,8 @@ class MessageFormatter:
                             sl_pct = ((sl_price - signal_price) / signal_price) * 100 if signal_price else 0.0
                         except Exception:
                             sl_pct = 0.0
-                        hit_emoji = "✅" if sl_hit_status.get(key, False) else "⏳"
+                        # SL hit olduğunda ❌ (zarar demek, kötü bir şey)
+                        hit_emoji = "❌" if sl_hit_status.get(key, False) else "⏳"
                         sl_levels.append(
                             f"   SL {key}x ATR: {fmt_price(sl_price)} ({sl_pct:+.2f}%) {hit_emoji}"
                         )
