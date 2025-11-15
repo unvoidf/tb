@@ -61,9 +61,19 @@ def test_format_signal_alert_simulation(mocker):
     print(message)
     print("--- END SIMULATED MESSAGE ---")
 
-    assert "Sinyal Geliş Zamanı" in message
-    assert "Sinyal Günlüğü" in message
-    assert "Henüz kayıt yok" in message
-    assert "Risk" not in message
-    assert "Sinyal ID" in message
-    assert signal_id in message
+    assert "*Giriş:*" in message
+    assert "*Durum:*" in message
+    assert "🎯 *HEDEFLER*" in message
+    assert "🛡 *STOP LOSS*" in message
+    assert "📊 *Teknik Detay*" in message
+    assert f"`{signal_id}`" not in message  # ID escape edilmiyor
+
+
+def test_escape_handles_plus_inside_bold(mocker):
+    mocker.patch('bot.message_formatter.LoggerManager')
+    formatter = MessageFormatter()
+    
+    raw_text = "*+0.44%*"
+    escaped = formatter._escape_markdown_v2_selective(raw_text)
+    
+    assert escaped == "*\\+0\\.44%*"

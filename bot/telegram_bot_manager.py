@@ -136,7 +136,8 @@ class TelegramBotManager:
         try:
             kwargs = {
                 'chat_id': channel_id,
-                'text': message
+                'text': message,
+                'parse_mode': 'MarkdownV2'  # MarkdownV2 formatını kullan
             }
             if reply_markup:
                 kwargs['reply_markup'] = reply_markup
@@ -227,7 +228,8 @@ class TelegramBotManager:
             kwargs = {
                 'chat_id': channel_id,
                 'message_id': message_id,
-                'text': message
+                'text': message,
+                'parse_mode': 'MarkdownV2'  # MarkdownV2 formatını kullan
             }
             # reply_markup None ise, Telegram otomatik olarak mevcut keyboard'u korur
             # Explicit olarak None göndermek yerine, parametreyi hiç göndermeyiz
@@ -272,7 +274,8 @@ class TelegramBotManager:
                 kwargs = {
                     'chat_id': channel_id,
                     'message_id': message_id,
-                    'text': message
+                    'text': message,
+                    'parse_mode': 'MarkdownV2'  # MarkdownV2 formatını kullan
                 }
                 if reply_markup is not None:
                     kwargs['reply_markup'] = reply_markup
@@ -316,7 +319,8 @@ class TelegramBotManager:
                 kwargs = {
                     'chat_id': channel_id,
                     'message_id': message_id,
-                    'text': message
+                    'text': message,
+                    'parse_mode': 'MarkdownV2'  # MarkdownV2 formatını kullan
                 }
                 if reply_markup is not None:
                     kwargs['reply_markup'] = reply_markup
@@ -442,7 +446,8 @@ class TelegramBotManager:
         try:
             kwargs = {
                 'chat_id': chat_id,
-                'text': text
+                'text': text,
+                'parse_mode': 'MarkdownV2'  # MarkdownV2 formatını kullan
             }
             if reply_to_message_id:
                 kwargs['reply_to_message_id'] = reply_to_message_id

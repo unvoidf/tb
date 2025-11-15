@@ -21,8 +21,11 @@ class MessageFormatter:
         """
         Telegram MarkdownV2 için özel karakterleri escape eder.
         
-        MarkdownV2'de escape edilmesi gereken karakterler:
-        _ * [ ] ( ) ~ ` > # + - = | { } . !
+        MarkdownV2'de escape edilmesi GEREKEN karakterler (sadece bunlar):
+        _ * [ ] ( ) ~ ` 
+        
+        Not: Diğer karakterler (+, -, =, |, {, }, ., !, >, #) normal metinde 
+        escape edilmemeli, sadece özel bağlamlarda gerekli.
         
         Args:
             text: Escape edilecek metin
@@ -33,8 +36,10 @@ class MessageFormatter:
         if not text:
             return text
         
-        # MarkdownV2 özel karakterleri
-        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        # MarkdownV2'de MUTLAKA escape edilmesi gereken karakterler
+        # Sadece bu karakterler escape edilmeli
+        # Not: () parantezler sadece link formatında kullanılıyor, normal metinde escape edilmemeli
+        special_chars = ['_', '*', '[', ']', '~', '`']
         
         # Her özel karakteri escape et
         escaped = text
@@ -42,16 +47,44 @@ class MessageFormatter:
             escaped = escaped.replace(char, f'\\{char}')
         
         return escaped
+
+    @staticmethod
+    def _escape_markdown_v2_chars(
+        text: str,
+        special_chars: Optional[List[str]] = None
+    ) -> str:
+        """
+        MarkdownV2 formatında belirtilen karakterleri escape eder.
+        
+        Args:
+            text: İşlenecek metin
+            special_chars: Escape edilecek özel karakter listesi
+            
+        Returns:
+            Escape edilmiş metin
+        """
+        if not text:
+            return text
+        
+        chars = special_chars or [
+            '[', ']', '(', ')', '~', '>', '#', '+', '-', '=', '|',
+            '{', '}', '.', '!'
+        ]
+        
+        escaped = text
+        for char in chars:
+            escaped = escaped.replace(char, f'\\{char}')
+        return escaped
     
     @staticmethod
     def _escape_markdown_v2_smart(text: str, preserve_code_blocks: bool = True) -> str:
         """
         Akıllı Markdown escape: Code block ve bold/italic içindeki karakterleri korur.
         
-        Telegram'ın eski Markdown formatı için:
-        - **bold** -> korunur
-        - _italic_ -> korunur  
-        - `code` -> korunur
+        Telegram'ın MarkdownV2 formatı için:
+        - *bold* -> korunur (tek yıldız) - ESCAPE EDİLMEZ
+        - _italic_ -> korunur - ESCAPE EDİLMEZ
+        - `code` -> korunur - ESCAPE EDİLMEZ
         
         Args:
             text: Escape edilecek metin
@@ -77,7 +110,7 @@ class MessageFormatter:
         matches = list(re.finditer(pattern, text))
         
         for match in matches:
-            # Code block öncesi kısmı escape et (bold/italic korunarak)
+            # Code block öncesi kısmı escape et (bold/italic KORUNARAK)
             before = text[last_end:match.start()]
             before_escaped = MessageFormatter._escape_markdown_v2_selective(before)
             parts.append(before_escaped)
@@ -90,21 +123,23 @@ class MessageFormatter:
             
             last_end = match.end()
         
-        # Kalan kısmı escape et
+        # Kalan kısmı escape et (bold/italic KORUNARAK)
         if last_end < len(text):
             remaining = text[last_end:]
-            parts.append(MessageFormatter._escape_markdown_v2_selective(remaining))
+            # Kalan kısımda da code block olabilir, tekrar kontrol et
+            remaining_escaped = MessageFormatter._escape_markdown_v2_selective(remaining)
+            parts.append(remaining_escaped)
         
         return ''.join(parts)
     
     @staticmethod
     def _escape_markdown_v2_selective(text: str) -> str:
         """
-        Seçici Markdown escape: Bold (**) ve italic (_) formatlarını korur,
+        Seçici Markdown escape: Bold (*) ve italic (_) formatlarını korur,
         diğer özel karakterleri escape eder.
         
-        Telegram'ın eski Markdown formatında:
-        - **bold** -> korunur
+        Telegram'ın MarkdownV2 formatında:
+        - *bold* -> korunur (tek yıldız)
         - _italic_ -> korunur
         - Diğer özel karakterler escape edilir
         
@@ -120,46 +155,56 @@ class MessageFormatter:
         import re
         
         # Bold ve italic pattern'lerini koru
-        # **text** -> korunur
+        # *text* -> korunur (MarkdownV2 için tek yıldız)
         # _text_ -> korunur
         
         # Önce bold ve italic pattern'lerini işaretle
         # Sonra diğer özel karakterleri escape et
         # En son bold/italic işaretlerini geri getir
         
-        # Geçici placeholder'lar
+        # Geçici placeholder'lar - benzersiz olmalı
+        import uuid
         placeholders = {}
-        placeholder_idx = 0
         
-        # Bold pattern: **text**
+        # Bold pattern: *text* (MarkdownV2 için tek yıldız)
         def bold_replacer(match):
-            nonlocal placeholder_idx
-            placeholder = f"__BOLD_{placeholder_idx}__"
-            placeholders[placeholder] = match.group(0)
-            placeholder_idx += 1
+            unique_id = str(uuid.uuid4())[:8]
+            placeholder = f"__BOLD_{unique_id}__"
+            content = match.group(1)
+            escaped_content = MessageFormatter._escape_markdown_v2_chars(content)
+            placeholders[placeholder] = f"*{escaped_content}*"
             return placeholder
         
-        # Italic pattern: _text_ (ama ** içinde değilse)
+        # Italic pattern: _text_ (ama * içinde değilse)
         def italic_replacer(match):
-            nonlocal placeholder_idx
-            placeholder = f"__ITALIC_{placeholder_idx}__"
-            placeholders[placeholder] = match.group(0)
-            placeholder_idx += 1
+            unique_id = str(uuid.uuid4())[:8]
+            placeholder = f"__ITALIC_{unique_id}__"
+            content = match.group(1)
+            escaped_content = MessageFormatter._escape_markdown_v2_chars(content)
+            placeholders[placeholder] = f"_{escaped_content}_"
             return placeholder
         
-        # Bold'u koru
-        text = re.sub(r'\*\*([^*]+)\*\*', bold_replacer, text)
+        # Bold'u koru (*text* - tek yıldız, MarkdownV2)
+        # Basit pattern: * ile başlayıp * ile biten (ama ** değil)
+        text = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', bold_replacer, text)
         
-        # Italic'i koru (bold placeholder'larından sonra)
-        text = re.sub(r'(?<!_)_([^_]+)_(?!_)', italic_replacer, text)
+        # Italic'i koru (_text_ - alt çizgi)
+        text = re.sub(r'(?<!_)_([^_\s]+(?:\s+[^_\s]+)*)_(?!_)', italic_replacer, text)
         
         # Diğer özel karakterleri escape et (bold/italic dışında)
-        special_chars_to_escape = ['[', ']', '(', ')', '~', '>', '#', '+', '=', '|', '{', '}', '.', '!']
-        for char in special_chars_to_escape:
-            text = text.replace(char, f'\\{char}')
+        # Telegram MarkdownV2 dokümantasyonuna göre:
+        # "In all other places characters '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!' must be escaped"
+        # NOT: Backtick (`) escape edilmemeli çünkü _escape_markdown_v2_smart fonksiyonu
+        # code block'ları zaten koruyor. Burada escape edersek code block pattern'i bozulur.
+        # Bold/italic pattern'leri placeholder'a çevrildiği için içlerindeki karakterler escape edilmiyor
+        # 
+        # ÖNEMLİ: Telegram dokümantasyonuna TAMAMEN uymalıyız!
+        # Parantezler de dahil tüm özel karakterler escape edilmeli
+        # Placeholder mekanizması sayesinde bold/italic içindeki karakterler korunuyor
+        text = MessageFormatter._escape_markdown_v2_chars(text)
         
-        # Placeholder'ları geri getir
-        for placeholder, original in placeholders.items():
+        # Placeholder'ları geri getir (ters sırada - en son eklenenler önce)
+        for placeholder, original in reversed(list(placeholders.items())):
             text = text.replace(placeholder, original)
         
         return text
@@ -944,12 +989,11 @@ class MessageFormatter:
             direction_color = '🔴' if direction == 'SHORT' else '🟢'
             header_line = f"{direction_color} {direction_title} | {symbol}"
             lines = [header_line]
-            lines.append("➖➖➖➖➖➖➖➖➖")
             lines.append("")
             
             # Giriş ve Güncel Fiyat
-            lines.append(f"**Giriş:** {fmt_price(signal_price)} (Sinyal)")
-            lines.append(f"**Güncel:** {fmt_price(now_price)}")
+            lines.append(f"*Giriş:* {fmt_price(signal_price)} (Sinyal)")
+            lines.append(f"*Güncel:* {fmt_price(now_price)}")
             
             # PNL (Kar/Zarar) - Direction'a göre doğru gösterim
             pnl_emoji = '✅' if pnl_pct > 0 else '❌' if pnl_pct < 0 else '🔁'
@@ -964,15 +1008,16 @@ class MessageFormatter:
             except Exception:
                 pnl_amount = 0.0
             
-            lines.append(f"**Durum:** {pnl_emoji} **{pnl_pct:+.2f}%** ({pnl_status})")
+            lines.append(f"*Durum:* {pnl_emoji} *{pnl_pct:+.2f}%* ({pnl_status})")
             if abs(pnl_amount) > 0.01:
-                lines.append(f"**PNL:** {fmt_money_2(pnl_amount)}")
+                lines.append(f"*PNL:* {fmt_money_2(pnl_amount)}")
             
             # Geçen süre
             signal_created_at = created_at if created_at else int(time.time())
             elapsed_time_str = self._format_time_elapsed(signal_created_at, current_price_time)
             if elapsed_time_str != "-":
-                lines.append(f"⏱ *{elapsed_time_str}*")
+                # Italic için _ kullan (MarkdownV2'de * bold, _ italic)
+                lines.append(f"⏱ _{elapsed_time_str}_")
             
             lines.append("")
 
@@ -980,7 +1025,7 @@ class MessageFormatter:
             timeframe = entry_levels.get('timeframe') or ''
 
             # TP seviyeleri (R:R 1:1, 1:2, 1:3) - ÖNCE
-            lines.append("🎯 **HEDEFLER**")
+            lines.append("🎯 *HEDEFLER*")
             if is_ranging_strategy:
                 for idx, key in enumerate(['tp1', 'tp2', 'tp3'], start=1):
                     target_info = custom_targets.get(key)
@@ -1026,10 +1071,8 @@ class MessageFormatter:
                         tps.append(f"🎯 {fmt_price(tp_price)} ({tp_pct:+.2f}%) (RR {float(rr):.1f}) {hit_emoji}")
                 lines.extend(tps)
             lines.append("")
-            
-            lines.append("")
             # SL seviyeleri
-            lines.append("🛡 **STOP LOSS**")
+            lines.append("🛡 *STOP LOSS*")
             sl_levels = []
             multipliers = [1.0, 1.5, 2.0]
             sl_keys_order = ['1', '1.5', '2']
@@ -1077,7 +1120,6 @@ class MessageFormatter:
                 lines.extend(sl_levels)
                 if not sl_levels:
                     lines.append("   -")
-                lines.append("")
                 extra_sl_lines = []
             else:
                 sl_levels = []
@@ -1118,7 +1160,6 @@ class MessageFormatter:
                 lines.extend(sl_levels)
                 if not sl_levels:
                     lines.append("   -")
-                lines.append("")
                 
                 if sl_hits:
                     for key, value in sl_hits.items():
@@ -1186,8 +1227,6 @@ class MessageFormatter:
             
             if extra_sl_lines:
                 lines.extend(extra_sl_lines)
-                lines.append("")
-            lines.append("")
 
             # TP/SL hit timeline (sadece hit'leri göster, signal log kaldırıldı)
             timeline: List[tuple[int, str]] = []
@@ -1219,36 +1258,39 @@ class MessageFormatter:
             # Sinyal günlüğü bölümü (sadece hit varsa göster)
             if timeline:
                 lines.append("")
-                lines.append("📝 **Sinyal Günlüğü:**")
+                lines.append("📝 *Sinyal Günlüğü:*")
                 for ts, desc in timeline:
                     lines.append(f"{self._format_timestamp_with_seconds(ts)} - {desc}")
 
             # Teknik detaylar (footer)
             lines.append("")
-            lines.append("📊 **Teknik Detay**")
+            lines.append("📊 *Teknik Detay*")
             strategy_name = "Mean Reversion" if is_ranging_strategy else "Trend Following"
-            # Strateji ismini escape et (code block içine koymadan önce)
-            # Code block içinde escape gerekmez ama güvenlik için escape ediyoruz
-            # Çünkü code block dışında kullanılırsa sorun çıkar
-            strategy_name_escaped = self._escape_markdown_v2(strategy_name)
-            lines.append(f"strateji: `{strategy_name_escaped}`")
+            # Code block içine aldığımız değişkenleri escape ETMEYELİM
+            # Code block içinde backslash literal olarak görünüyor, çirkin duruyor
+            lines.append(f"strateji: `{strategy_name}`")
             lines.append(f"güven: `{confidence_pct}%`")
             if forecast_text != 'N/A':
-                # Forecast text'i de escape et
-                forecast_text_escaped = self._escape_markdown_v2(forecast_text)
-                lines.append(f"4h_teyit: `{forecast_text_escaped}`")
+                # Code block içine aldığımız için escape etmiyoruz
+                # Alt çizgi hatası: 4h_teyit -> 4H Teyit (boşluklu)
+                lines.append(f"4H Teyit: `{forecast_text}`")
 
             # Mesajı birleştir
             message = '\n'.join(lines)
             
-            # Markdown hatalarını önlemek için escape et
-            # Code block'ları koruyarak akıllı escape yap
+            # MarkdownV2 için escape et
+            # parse_mode='MarkdownV2' kullanıldığı için bold/italic formatlarını KORUYORUZ
+            # Sadece code block dışındaki özel karakterleri escape et
             try:
+                # Code block'ları koruyarak escape et
+                # Bold (*text*) ve italic (_text_) formatlarını KORUYORUZ
                 message = self._escape_markdown_v2_smart(message, preserve_code_blocks=True)
             except Exception as e:
                 self.logger.warning(f"Markdown escape hatası, mesaj olduğu gibi gönderilecek: {str(e)}")
-                # Hata durumunda en azından kritik karakterleri escape et
-                message = message.replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]')
+                # Hata durumunda sadece kritik karakterleri escape et (bold/italic'i koru)
+                # Bold/italic formatlarını escape ETME
+                # Sadece gerçekten gerekli karakterleri escape et
+                message = message.replace('[', '\\[').replace(']', '\\]').replace('~', '\\~').replace('|', '\\|')
             
             return message
             
