@@ -82,8 +82,10 @@ class MessageFormatter:
             before_escaped = MessageFormatter._escape_markdown_v2_selective(before)
             parts.append(before_escaped)
             
-            # Code block içeriğini olduğu gibi bırak
+            # Code block içeriğini olduğu gibi bırak (ESCAPE ETME!)
+            # Code block içinde özel karakterler (nokta, köşeli parantez vs.) escape edilmemeli
             code_content = match.group(1)
+            # Code block içeriğini hiç escape etme - Telegram zaten code block içinde parse etmez
             parts.append(f'`{code_content}`')
             
             last_end = match.end()
@@ -1225,10 +1227,16 @@ class MessageFormatter:
             lines.append("")
             lines.append("📊 **Teknik Detay**")
             strategy_name = "Mean Reversion" if is_ranging_strategy else "Trend Following"
-            lines.append(f"strateji: `{strategy_name}`")
+            # Strateji ismini escape et (code block içine koymadan önce)
+            # Code block içinde escape gerekmez ama güvenlik için escape ediyoruz
+            # Çünkü code block dışında kullanılırsa sorun çıkar
+            strategy_name_escaped = self._escape_markdown_v2(strategy_name)
+            lines.append(f"strateji: `{strategy_name_escaped}`")
             lines.append(f"güven: `{confidence_pct}%`")
             if forecast_text != 'N/A':
-                lines.append(f"4h_teyit: `{forecast_text}`")
+                # Forecast text'i de escape et
+                forecast_text_escaped = self._escape_markdown_v2(forecast_text)
+                lines.append(f"4h_teyit: `{forecast_text_escaped}`")
 
             # Mesajı birleştir
             message = '\n'.join(lines)
