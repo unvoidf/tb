@@ -160,6 +160,27 @@ class AdaptiveThresholdManager:
         elif trend_strength['strength'] == 'WEAK':
             adjusted *= 0.8
         
+        # Crash Protection: Çok güçlü trendlerde (ADX > 45) ters yönde işlem açma güvenini sıfırla
+        adx_value = trend_strength.get('value', 0)
+        if adx_value > 45 and direction:
+            # Trend çok güçlüyse, ters yönde işlem açma güvenini çok düşür
+            if direction == 'LONG' and volatility.get('level') == 'HIGH':
+                # Düşen bıçak koruması: Yüksek volatilitede LONG sinyali
+                adjusted *= 0.1  # Güveni %90 kır
+                self.logger.warning(
+                    f"Crash protection aktif: ADX={adx_value:.1f} > 45, "
+                    f"direction={direction}, volatility=HIGH. "
+                    f"Confidence {base_confidence:.3f} -> {adjusted:.3f}"
+                )
+            elif direction == 'SHORT' and volatility.get('level') == 'HIGH':
+                # Pump koruması: Yüksek volatilitede SHORT sinyali
+                adjusted *= 0.1  # Güveni %90 kır
+                self.logger.warning(
+                    f"Pump protection aktif: ADX={adx_value:.1f} > 45, "
+                    f"direction={direction}, volatility=HIGH. "
+                    f"Confidence {base_confidence:.3f} -> {adjusted:.3f}"
+                )
+        
         # Yüksek volatilite confidence azaltır
         if volatility['level'] == 'HIGH':
             adjusted *= 0.9

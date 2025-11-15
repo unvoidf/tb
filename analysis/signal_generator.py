@@ -19,7 +19,8 @@ class SignalGenerator:
                  volume_analyzer: VolumeAnalyzer,
                  threshold_manager: AdaptiveThresholdManager,
                  timeframe_weights: Dict[str, float],
-                 ranging_analyzer: RangingStrategyAnalyzer):
+                 ranging_analyzer: RangingStrategyAnalyzer,
+                 market_data_manager=None):
         """
         SignalGenerator'ı başlatır.
         
@@ -29,35 +30,48 @@ class SignalGenerator:
             threshold_manager: Eşik yöneticisi
             timeframe_weights: Timeframe ağırlıkları
             ranging_analyzer: Ranging stratejisi analizörü
+            market_data_manager: Market data manager (opsiyonel, BTC correlation için)
         """
         self.indicator_calc = indicator_calculator
         self.volume_analyzer = volume_analyzer
         self.threshold_mgr = threshold_manager
         self.tf_weights = timeframe_weights
         self.ranging_analyzer = ranging_analyzer
+        self.market_data = market_data_manager
         self.logger = LoggerManager().get_logger('SignalGenerator')
     
     def generate_signal(
-        self, multi_tf_data: Dict[str, pd.DataFrame]
+        self, multi_tf_data: Dict[str, pd.DataFrame], symbol: str = None
     ) -> Optional[Dict]:
         """
         Multi-timeframe veriden sinyal üretir.
         
         Args:
             multi_tf_data: Timeframe'lere göre DataFrame dict
+            symbol: Trading pair (örn: BTC/USDT) - BTC correlation check için
             
         Returns:
-            Sinyal bilgileri dict
+            Sinyal bilgileri dict veya None (filtreleme sonucu)
         """
         if not multi_tf_data:
             return None
         
+        # 1. BTC Correlation Check (Bitcoin Kraldır Filtresi)
+        if symbol and symbol != 'BTC/USDT':
+            market_state = self._check_global_market_condition()
+            if market_state == 'BEARISH_CRASH':
+                self.logger.warning(
+                    f"{symbol} LONG sinyali reddedildi: Global piyasa (BTC) çöküşte. "
+                    f"Bitcoin Kraldır filtresi aktif."
+                )
+                return None
+        
         tf_signals = {}
-        self.logger.debug(f"generate_signal: tfs={list(multi_tf_data.keys())}")
+        self.logger.debug(f"generate_signal: symbol={symbol}, tfs={list(multi_tf_data.keys())}")
         
         # Her timeframe için sinyal hesapla
         for tf, df in multi_tf_data.items():
-            signal = self._analyze_single_timeframe(df)
+            signal = self._analyze_single_timeframe(df, tf, multi_tf_data)
             if signal:
                 tf_signals[tf] = signal
                 self.logger.debug(f"tf={tf} -> direction={signal['direction']}, confidence={signal['confidence']:.3f}")
@@ -66,7 +80,27 @@ class SignalGenerator:
             return None
         
         # Timeframe'leri birleştir
-        combined_signal = self._combine_timeframe_signals(tf_signals)
+        combined_signal = self._combine_timeframe_signals(tf_signals, multi_tf_data)
+        
+        # 2. Intraday Circuit Breaker (4h EMA kontrolü)
+        if combined_signal and combined_signal.get('direction') == 'LONG':
+            if self._check_intraday_circuit_breaker(multi_tf_data):
+                self.logger.warning(
+                    f"{symbol} LONG sinyali reddedildi: Intraday circuit breaker aktif. "
+                    f"Serbest düşüş tespit edildi."
+                )
+                return None
+        
+        # 3. Volume Climax Check (Ranging LONG için)
+        if combined_signal and combined_signal.get('strategy_type') == 'ranging':
+            if combined_signal.get('direction') == 'LONG':
+                if not self._check_volume_climax(multi_tf_data):
+                    self.logger.warning(
+                        f"{symbol} Ranging LONG sinyali reddedildi: Volume climax yok. "
+                        f"Düşük hacimli düşüş - panik satışlar bitmemiş."
+                    )
+                    return None
+        
         self.logger.debug(
             f"combined: direction={combined_signal['direction']}, "
             f"combined_conf_for_direction={combined_signal['combined_conf_for_direction']:.3f}, "
@@ -75,7 +109,7 @@ class SignalGenerator:
         
         return combined_signal
     
-    def _analyze_single_timeframe(self, df: pd.DataFrame) -> Optional[Dict]:
+    def _analyze_single_timeframe(self, df: pd.DataFrame, tf: str = None, multi_tf_data: Dict = None) -> Optional[Dict]:
         """
         Tek timeframe için analiz yapar.
         Veri miktarına göre adaptive analiz uygular.
@@ -268,7 +302,7 @@ class SignalGenerator:
         return direction, confidence
     
     def _combine_timeframe_signals(
-        self, tf_signals: Dict[str, Dict]
+        self, tf_signals: Dict[str, Dict], multi_tf_data: Dict = None
     ) -> Dict:
         """
         Farklı timeframe sinyallerini ağırlıklı birleştirir.
@@ -281,14 +315,53 @@ class SignalGenerator:
         """
         weighted_scores = {'LONG': 0, 'SHORT': 0, 'NEUTRAL': 0}
         
-        ranging_candidates = [
-            signal for signal in tf_signals.values()
-            if signal.get('strategy_type') == 'ranging'
-            and signal.get('confidence', 0) >= 0.7
-        ]
+        # Önce günlük trendi kontrol et (Veto mekanizması)
+        daily_trend = tf_signals.get('1d', {}).get('direction', 'NEUTRAL')
+        daily_trend_strength = tf_signals.get('1d', {}).get('trend_strength', {})
+        daily_adx = daily_trend_strength.get('value', 0) if isinstance(daily_trend_strength, dict) else 0
+        
+        # Ranging adaylarını filtrele: Ana trend tersine işlem açma!
+        ranging_candidates = []
+        for signal in tf_signals.values():
+            if signal.get('strategy_type') == 'ranging' and signal.get('confidence', 0) >= 0.7:
+                signal_direction = signal.get('direction', 'NEUTRAL')
+                
+                # Günlük trend SHORT ise, ranging LONG sinyali kabul etme
+                if daily_trend == 'SHORT' and signal_direction == 'LONG':
+                    self.logger.warning(
+                        f"Ranging LONG sinyali reddedildi: Günlük trend SHORT "
+                        f"(ADX={daily_adx:.1f}). Falling knife koruması aktif."
+                    )
+                    continue
+                
+                # Günlük trend LONG ise, ranging SHORT sinyali kabul etme
+                if daily_trend == 'LONG' and signal_direction == 'SHORT':
+                    self.logger.warning(
+                        f"Ranging SHORT sinyali reddedildi: Günlük trend LONG "
+                        f"(ADX={daily_adx:.1f}). Pump koruması aktif."
+                    )
+                    continue
+                
+                # Güçlü trendlerde (ADX > 45) ranging sinyallerini daha da filtrele
+                if daily_adx > 45:
+                    # Çok güçlü trend varsa, ters yönde ranging sinyali kabul etme
+                    if (daily_trend == 'SHORT' and signal_direction == 'LONG') or \
+                       (daily_trend == 'LONG' and signal_direction == 'SHORT'):
+                        self.logger.warning(
+                            f"Ranging sinyali reddedildi: Çok güçlü trend "
+                            f"(ADX={daily_adx:.1f} > 45). Crash protection aktif."
+                        )
+                        continue
+                
+                ranging_candidates.append(signal)
         
         if ranging_candidates:
             dominant_signal = max(ranging_candidates, key=lambda s: s.get('confidence', 0))
+            self.logger.info(
+                f"Ranging stratejisi seçildi: direction={dominant_signal['direction']}, "
+                f"confidence={dominant_signal['confidence']:.3f}, "
+                f"daily_trend={daily_trend} (ADX={daily_adx:.1f})"
+            )
             return {
                 'direction': dominant_signal['direction'],
                 'combined_conf_for_direction': dominant_signal['confidence'],
@@ -501,4 +574,155 @@ class SignalGenerator:
             'adx_strength': adx_value,
             'regime': regime_value
         }
+    
+    def _check_global_market_condition(self) -> str:
+        """
+        BTC'nin durumunu kontrol eder. Eğer BTC sert düşüyorsa, altcoinlerde LONG açmayı yasaklar.
+        Bitcoin Kraldır Filtresi.
+        
+        Returns:
+            'BEARISH_CRASH' - BTC çöküşte, altcoinlerde LONG yasak
+            'NEUTRAL' - Normal durum
+        """
+        if not self.market_data:
+            self.logger.debug("MarketDataManager yok, BTC correlation check atlandı")
+            return 'NEUTRAL'
+        
+        try:
+            btc_ticker = self.market_data.get_ticker_info('BTC/USDT')
+            if not btc_ticker:
+                self.logger.warning("BTC ticker bilgisi alınamadı, correlation check atlandı")
+                return 'NEUTRAL'
+            
+            # 24 saatlik değişim yüzdesi
+            change_24h = btc_ticker.get('percentage', 0) or 0
+            
+            # BTC 1 saatlik RSI kontrolü için OHLCV çek
+            btc_1h = self.market_data.fetch_ohlcv('BTC/USDT', '1h', 50)
+            if btc_1h is not None and len(btc_1h) >= 14:
+                indicators = self.indicator_calc.calculate_all(btc_1h)
+                rsi_value = indicators.get('rsi', {}).get('value', 50)
+            else:
+                rsi_value = 50  # Default, bilinmiyor
+            
+            # Kural 1: BTC son 24 saatte %-3'ten fazla düştüyse
+            if change_24h < -3.0:
+                self.logger.info(
+                    f"BTC correlation check: BTC 24h değişim={change_24h:.2f}% < -3%, "
+                    f"BEARISH_CRASH tespit edildi"
+                )
+                return 'BEARISH_CRASH'
+            
+            # Kural 2: BTC 1 saatlik RSI < 30 ise (aşırı satım ama düşüş devam ediyor)
+            if rsi_value < 30:
+                self.logger.info(
+                    f"BTC correlation check: BTC 1h RSI={rsi_value:.1f} < 30, "
+                    f"BEARISH_CRASH tespit edildi"
+                )
+                return 'BEARISH_CRASH'
+            
+            return 'NEUTRAL'
+            
+        except Exception as e:
+            self.logger.error(
+                f"BTC correlation check hatası: {str(e)}",
+                exc_info=True
+            )
+            return 'NEUTRAL'
+    
+    def _check_intraday_circuit_breaker(self, multi_tf_data: Dict[str, pd.DataFrame]) -> bool:
+        """
+        Intraday Circuit Breaker: 4 saatlik EMA kontrolü.
+        Fiyat 4 saatlik grafikte EMA 50'nin altındaysa ve aradaki fark %5'ten fazlaysa,
+        bu bir "Serbest Düşüş"tür. LONG sinyalleri reddedilir.
+        
+        Args:
+            multi_tf_data: Multi-timeframe veri dict
+            
+        Returns:
+            True - Circuit breaker aktif (LONG reddedilmeli)
+            False - Normal durum
+        """
+        df_4h = multi_tf_data.get('4h')
+        if df_4h is None or len(df_4h) < 50:
+            return False  # Veri yoksa, circuit breaker devre dışı
+        
+        try:
+            indicators = self.indicator_calc.calculate_all(df_4h)
+            ema_data = indicators.get('ema', {})
+            
+            # EMA 50 hesapla (eğer yoksa EMA medium kullan)
+            ema_50 = ema_data.get('ema_medium', None)
+            if ema_50 is None:
+                # EMA 50 manuel hesapla
+                ema_50 = df_4h['close'].ewm(span=50, adjust=False).mean().iloc[-1]
+            
+            current_price = df_4h['close'].iloc[-1]
+            
+            # Fiyat EMA 50'nin altındaysa ve fark %5'ten fazlaysa
+            if current_price < ema_50:
+                price_diff_pct = ((ema_50 - current_price) / ema_50) * 100
+                if price_diff_pct > 5.0:
+                    self.logger.info(
+                        f"Intraday circuit breaker: Fiyat EMA50'nin %{price_diff_pct:.2f} altında. "
+                        f"Serbest düşüş tespit edildi."
+                    )
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(
+                f"Intraday circuit breaker hatası: {str(e)}",
+                exc_info=True
+            )
+            return False
+    
+    def _check_volume_climax(self, multi_tf_data: Dict[str, pd.DataFrame]) -> bool:
+        """
+        Volume Climax Check: Ranging LONG sinyalleri için hacim doğrulaması.
+        Ters yönlü işlem (Reversal/Ranging Long) açmak için:
+        Mevcut mumun hacmi, ortalama hacmin (SMA 20) en az 1.5 katı olmalı.
+        Bu, "panik satışların bittiğini ve alıcıların güçlü girdiğini" teyit eder.
+        
+        Args:
+            multi_tf_data: Multi-timeframe veri dict
+            
+        Returns:
+            True - Volume climax var (LONG açılabilir)
+            False - Volume climax yok (LONG reddedilmeli)
+        """
+        # 4h veya 1h timeframe'ini kullan (öncelik 4h)
+        df = multi_tf_data.get('4h') or multi_tf_data.get('1h')
+        if df is None or len(df) < 20:
+            self.logger.debug("Volume climax check: Yeterli veri yok")
+            return False  # Veri yoksa, güvenli tarafta kal (reddet)
+        
+        try:
+            volume_analysis = self.volume_analyzer.analyze(df, period=20)
+            if not volume_analysis:
+                return False
+            
+            relative_volume = volume_analysis.get('relative', 0)
+            
+            # Hacim en az 1.5 kat olmalı (volume climax)
+            if relative_volume >= 1.5:
+                self.logger.info(
+                    f"Volume climax check: Relative volume={relative_volume:.2f} >= 1.5. "
+                    f"Panik satışlar bitti, alıcılar güçlü."
+                )
+                return True
+            else:
+                self.logger.debug(
+                    f"Volume climax check: Relative volume={relative_volume:.2f} < 1.5. "
+                    f"Yeterli hacim yok."
+                )
+                return False
+                
+        except Exception as e:
+            self.logger.error(
+                f"Volume climax check hatası: {str(e)}",
+                exc_info=True
+            )
+            return False  # Hata durumunda güvenli tarafta kal
 

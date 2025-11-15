@@ -71,7 +71,7 @@ class ApplicationFactory:
         fib_calculator = self._create_fibonacci_calculator(config)
         threshold_manager = self._create_adaptive_thresholds(config)
         signal_generator = self._create_signal_generator(
-            indicator_calc, volume_analyzer, threshold_manager, config
+            indicator_calc, volume_analyzer, threshold_manager, config, market_data
         )
         
         # Strategy Layer
@@ -242,7 +242,8 @@ class ApplicationFactory:
     def _create_signal_generator(self, indicator_calc: TechnicalIndicatorCalculator,
                                 volume_analyzer: VolumeAnalyzer,
                                 threshold_manager: AdaptiveThresholdManager,
-                                config: ConfigManager) -> SignalGenerator:
+                                config: ConfigManager,
+                                market_data: MarketDataManager = None) -> SignalGenerator:
         """Signal generator oluşturur."""
         ranging_analyzer = self._create_ranging_strategy_analyzer(config)
         self.container.register_singleton(RangingStrategyAnalyzer, ranging_analyzer)
@@ -251,7 +252,8 @@ class ApplicationFactory:
             volume_analyzer=volume_analyzer,
             threshold_manager=threshold_manager,
             timeframe_weights=config.timeframe_weights,
-            ranging_analyzer=ranging_analyzer
+            ranging_analyzer=ranging_analyzer,
+            market_data_manager=market_data
         )
     
     def _create_position_calculator(self, fib_calculator: FibonacciCalculator) -> PositionCalculator:

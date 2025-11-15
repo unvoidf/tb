@@ -432,8 +432,8 @@ class CommandHandler:
         if not multi_tf_data:
             return None
         
-        # Sinyal üret
-        signal = self.signal_gen.generate_signal(multi_tf_data)
+        # Sinyal üret (symbol parametresi eklendi)
+        signal = self.signal_gen.generate_signal(multi_tf_data, symbol=symbol)
         
         return signal
 
