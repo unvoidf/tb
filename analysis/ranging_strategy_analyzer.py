@@ -55,8 +55,17 @@ class RangingStrategyAnalyzer:
             ratio = max(float(min_stop_distance_percent), 0.0) / 100.0
         except (TypeError, ValueError):
             ratio = 0.005
+            self.logger.warning(
+                f"Invalid min_stop_distance_percent value, using default 0.5%"
+            )
         # Minimum %0.1 (0.001) sınırı ile aşırı düşük değerleri engelle
         self.min_stop_distance_ratio = max(ratio, 0.001)
+        
+        # Debug: Hangi değerin kullanıldığını logla
+        self.logger.debug(
+            f"RangingStrategyAnalyzer initialized with min_stop_distance_percent={min_stop_distance_percent}% "
+            f"(ratio={self.min_stop_distance_ratio:.6f})"
+        )
 
     def generate_signal(
         self, df: pd.DataFrame, indicators: Dict[str, Dict]
@@ -304,18 +313,34 @@ class RangingStrategyAnalyzer:
             base_stop = bb_lower - buffer
             # Minimum stop-loss mesafesini uygula (piyasa gürültüsüne karşı koruma)
             min_stop_with_distance = current_price - min_stop_distance
-            # Stop-loss bandın dışında olmalı, ama minimum mesafeyi de korumalı
-            # En yakın stop-loss'u seç (en büyük değer), ama bandın dışında olmalı
-            stop_price = max(base_stop, min_stop_with_distance)
+            # Stop-loss hem bandın dışında olmalı (base_stop) hem de minimum mesafe kuralını sağlamalı
+            # Minimum mesafe kuralı önceliklidir - eğer base_stop minimum mesafeyi ihlal ediyorsa,
+            # minimum mesafe kuralını uygula (daha aşağıda stop koy)
+            stop_price = min(base_stop, min_stop_with_distance)
             stop_price = max(stop_price, 0.0)
+            
+            # Eğer base_stop minimum mesafeyi ihlal ediyorsa logla
+            if base_stop > min_stop_with_distance:
+                self.logger.warning(
+                    f"Base stop ({base_stop:.6f}) violates minimum distance rule "
+                    f"({min_stop_with_distance:.6f}). Using minimum distance stop."
+                )
         else:
             # SHORT için: Stop-loss bandın hemen üstünde olmalı
             # Ayrıca bid tarafında kalmalı (giriş fiyatının altına düşmemeli)
             base_stop = bb_upper + buffer
             max_stop_with_distance = current_price + min_stop_distance
-            # Stop-loss girişten en az belirlenen yüzde kadar yukarıda olmalı.
-            # Eğer fiyat üst banda aşırı taşmışsa, stop'u daha üste çekmek için max seçiyoruz.
+            # Stop-loss hem bandın dışında olmalı (base_stop) hem de minimum mesafe kuralını sağlamalı
+            # Minimum mesafe kuralı önceliklidir - eğer base_stop minimum mesafeyi ihlal ediyorsa,
+            # minimum mesafe kuralını uygula (daha yukarıda stop koy)
             stop_price = max(base_stop, max_stop_with_distance)
+            
+            # Eğer base_stop minimum mesafeyi ihlal ediyorsa logla
+            if base_stop < max_stop_with_distance:
+                self.logger.warning(
+                    f"Base stop ({base_stop:.6f}) violates minimum distance rule "
+                    f"({max_stop_with_distance:.6f}). Using minimum distance stop."
+                )
 
         targets["stop_loss"] = {
             "price": stop_price,

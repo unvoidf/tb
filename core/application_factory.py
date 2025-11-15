@@ -228,7 +228,14 @@ class ApplicationFactory:
         """Ranging strateji analizörü oluşturur."""
         logger_manager = self.container.get_optional(LoggerManager)
         min_sl_percent = config.ranging_min_sl_percent
+        
+        # Debug: Config'den gelen değeri logla
         if logger_manager:
+            logger = logger_manager.get_logger("ApplicationFactory")
+            logger.debug(
+                f"Creating RangingStrategyAnalyzer with min_stop_distance_percent={min_sl_percent}% "
+                f"(from config.ranging_min_sl_percent)"
+            )
             return RangingStrategyAnalyzer(logger_manager, min_stop_distance_percent=min_sl_percent)
         return RangingStrategyAnalyzer(min_stop_distance_percent=min_sl_percent)
     
