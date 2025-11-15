@@ -146,11 +146,31 @@ class TelegramBotManager:
             self.logger.info(f"Kanal mesajı gönderildi - Message ID: {message_id}")
             return message_id
         except Exception as e:
-            self.logger.error(
-                f"Kanal mesajı gönderilemedi: {str(e)}",
-                exc_info=True
-            )
-            return None
+            error_msg = str(e).lower()
+            # Markdown parse hatası kontrolü
+            if "can't parse entities" in error_msg or "bad request" in error_msg:
+                self.logger.warning(
+                    f"Markdown parse hatası, mesaj plain text olarak gönderilecek: {str(e)}"
+                )
+                # Plain text olarak tekrar dene
+                try:
+                    kwargs['parse_mode'] = None  # Parse mode'u kaldır
+                    sent_message = await self.application.bot.send_message(**kwargs)
+                    message_id = sent_message.message_id
+                    self.logger.info(f"Kanal mesajı plain text olarak gönderildi - Message ID: {message_id}")
+                    return message_id
+                except Exception as retry_error:
+                    self.logger.error(
+                        f"Plain text kanal mesajı gönderme hatası: {str(retry_error)}",
+                        exc_info=True
+                    )
+                    return None
+            else:
+                self.logger.error(
+                    f"Kanal mesajı gönderilemedi: {str(e)}",
+                    exc_info=True
+                )
+                return None
 
     def send_channel_message(self, channel_id: str, message: str, reply_markup=None) -> Optional[int]:
         """
@@ -217,6 +237,30 @@ class TelegramBotManager:
             await self.application.bot.edit_message_text(**kwargs)
             self.logger.info(f"Kanal mesajı güncellendi - Message ID: {message_id}")
             return (True, False)
+        except Exception as parse_error:
+            error_msg = str(parse_error).lower()
+            # Markdown parse hatası kontrolü
+            if "can't parse entities" in error_msg or "bad request" in error_msg:
+                self.logger.warning(
+                    f"Markdown parse hatası, mesaj plain text olarak güncellenecek: {str(parse_error)}"
+                )
+                # Plain text olarak tekrar dene
+                try:
+                    kwargs['parse_mode'] = None  # Parse mode'u kaldır
+                    await self.application.bot.edit_message_text(**kwargs)
+                    self.logger.info(f"Kanal mesajı plain text olarak güncellendi - Message ID: {message_id}")
+                    return (True, False)
+                except Exception as retry_error:
+                    self.logger.error(
+                        f"Plain text kanal mesajı güncelleme hatası: {str(retry_error)}",
+                        exc_info=True
+                    )
+                    return (False, False)
+            # RetryAfter hatası için ayrı işlem
+            if isinstance(parse_error, RetryAfter):
+                raise  # RetryAfter'ı yukarı fırlat
+            # Diğer hatalar için normal işlem
+            raise
         except RetryAfter as e:
             # Flood control: Telegram'ın belirttiği süreyi bekle ve tekrar dene
             retry_after = e.retry_after
@@ -238,6 +282,15 @@ class TelegramBotManager:
                 return (True, False)
             except Exception as retry_error:
                 error_msg = str(retry_error).lower()
+                # Markdown parse hatası kontrolü
+                if "can't parse entities" in error_msg or "bad request" in error_msg:
+                    try:
+                        kwargs['parse_mode'] = None
+                        await self.application.bot.edit_message_text(**kwargs)
+                        self.logger.info(f"Kanal mesajı plain text olarak güncellendi (retry sonrası) - Message ID: {message_id}")
+                        return (True, False)
+                    except Exception:
+                        pass  # Fall through to message_not_found check
                 is_message_not_found = (
                     "message to edit not found" in error_msg or
                     "message not found" in error_msg
@@ -273,6 +326,15 @@ class TelegramBotManager:
                 return (True, False)
             except Exception as retry_error:
                 error_msg = str(retry_error).lower()
+                # Markdown parse hatası kontrolü
+                if "can't parse entities" in error_msg or "bad request" in error_msg:
+                    try:
+                        kwargs['parse_mode'] = None
+                        await self.application.bot.edit_message_text(**kwargs)
+                        self.logger.info(f"Kanal mesajı plain text olarak güncellendi (timeout retry sonrası) - Message ID: {message_id}")
+                        return (True, False)
+                    except Exception:
+                        pass  # Fall through to message_not_found check
                 is_message_not_found = (
                     "message to edit not found" in error_msg or
                     "message not found" in error_msg
@@ -389,10 +451,27 @@ class TelegramBotManager:
             await self.application.bot.send_message(**kwargs)
             self.logger.info(f"Mesaj gönderildi - Chat: {chat_id}")
         except Exception as e:
-            self.logger.error(
-                f"Async mesaj gönderme hatası: {str(e)}",
-                exc_info=True
-            )
+            error_msg = str(e).lower()
+            # Markdown parse hatası kontrolü
+            if "can't parse entities" in error_msg or "bad request" in error_msg:
+                self.logger.warning(
+                    f"Markdown parse hatası, mesaj plain text olarak gönderilecek: {str(e)}"
+                )
+                # Plain text olarak tekrar dene
+                try:
+                    kwargs['parse_mode'] = None  # Parse mode'u kaldır
+                    await self.application.bot.send_message(**kwargs)
+                    self.logger.info(f"Mesaj plain text olarak gönderildi - Chat: {chat_id}")
+                except Exception as retry_error:
+                    self.logger.error(
+                        f"Plain text mesaj gönderme hatası: {str(retry_error)}",
+                        exc_info=True
+                    )
+            else:
+                self.logger.error(
+                    f"Async mesaj gönderme hatası: {str(e)}",
+                    exc_info=True
+                )
     
     def _run_on_bot_loop(self, coro, return_result: bool = True):
         """Bot'un event loop'u üzerinde güvenli şekilde coroutine çalıştırır."""

@@ -16,6 +16,152 @@ class MessageFormatter:
     def __init__(self):
         self.logger = LoggerManager().get_logger('MessageFormatter')
     
+    @staticmethod
+    def _escape_markdown_v2(text: str) -> str:
+        """
+        Telegram MarkdownV2 için özel karakterleri escape eder.
+        
+        MarkdownV2'de escape edilmesi gereken karakterler:
+        _ * [ ] ( ) ~ ` > # + - = | { } . !
+        
+        Args:
+            text: Escape edilecek metin
+            
+        Returns:
+            Escape edilmiş metin
+        """
+        if not text:
+            return text
+        
+        # MarkdownV2 özel karakterleri
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        
+        # Her özel karakteri escape et
+        escaped = text
+        for char in special_chars:
+            escaped = escaped.replace(char, f'\\{char}')
+        
+        return escaped
+    
+    @staticmethod
+    def _escape_markdown_v2_smart(text: str, preserve_code_blocks: bool = True) -> str:
+        """
+        Akıllı Markdown escape: Code block ve bold/italic içindeki karakterleri korur.
+        
+        Telegram'ın eski Markdown formatı için:
+        - **bold** -> korunur
+        - _italic_ -> korunur  
+        - `code` -> korunur
+        
+        Args:
+            text: Escape edilecek metin
+            preserve_code_blocks: True ise code block içindeki karakterleri escape etmez
+            
+        Returns:
+            Escape edilmiş metin
+        """
+        if not text:
+            return text
+        
+        import re
+        
+        if not preserve_code_blocks:
+            return MessageFormatter._escape_markdown_v2_selective(text)
+        
+        # Code block pattern: `...` (backtick ile çevrili)
+        parts = []
+        last_end = 0
+        
+        # Tüm code block'ları bul (backtick ile çevrili)
+        pattern = r'`([^`]*)`'
+        matches = list(re.finditer(pattern, text))
+        
+        for match in matches:
+            # Code block öncesi kısmı escape et (bold/italic korunarak)
+            before = text[last_end:match.start()]
+            before_escaped = MessageFormatter._escape_markdown_v2_selective(before)
+            parts.append(before_escaped)
+            
+            # Code block içeriğini olduğu gibi bırak
+            code_content = match.group(1)
+            parts.append(f'`{code_content}`')
+            
+            last_end = match.end()
+        
+        # Kalan kısmı escape et
+        if last_end < len(text):
+            remaining = text[last_end:]
+            parts.append(MessageFormatter._escape_markdown_v2_selective(remaining))
+        
+        return ''.join(parts)
+    
+    @staticmethod
+    def _escape_markdown_v2_selective(text: str) -> str:
+        """
+        Seçici Markdown escape: Bold (**) ve italic (_) formatlarını korur,
+        diğer özel karakterleri escape eder.
+        
+        Telegram'ın eski Markdown formatında:
+        - **bold** -> korunur
+        - _italic_ -> korunur
+        - Diğer özel karakterler escape edilir
+        
+        Args:
+            text: Escape edilecek metin
+            
+        Returns:
+            Escape edilmiş metin
+        """
+        if not text:
+            return text
+        
+        import re
+        
+        # Bold ve italic pattern'lerini koru
+        # **text** -> korunur
+        # _text_ -> korunur
+        
+        # Önce bold ve italic pattern'lerini işaretle
+        # Sonra diğer özel karakterleri escape et
+        # En son bold/italic işaretlerini geri getir
+        
+        # Geçici placeholder'lar
+        placeholders = {}
+        placeholder_idx = 0
+        
+        # Bold pattern: **text**
+        def bold_replacer(match):
+            nonlocal placeholder_idx
+            placeholder = f"__BOLD_{placeholder_idx}__"
+            placeholders[placeholder] = match.group(0)
+            placeholder_idx += 1
+            return placeholder
+        
+        # Italic pattern: _text_ (ama ** içinde değilse)
+        def italic_replacer(match):
+            nonlocal placeholder_idx
+            placeholder = f"__ITALIC_{placeholder_idx}__"
+            placeholders[placeholder] = match.group(0)
+            placeholder_idx += 1
+            return placeholder
+        
+        # Bold'u koru
+        text = re.sub(r'\*\*([^*]+)\*\*', bold_replacer, text)
+        
+        # Italic'i koru (bold placeholder'larından sonra)
+        text = re.sub(r'(?<!_)_([^_]+)_(?!_)', italic_replacer, text)
+        
+        # Diğer özel karakterleri escape et (bold/italic dışında)
+        special_chars_to_escape = ['[', ']', '(', ')', '~', '>', '#', '+', '=', '|', '{', '}', '.', '!']
+        for char in special_chars_to_escape:
+            text = text.replace(char, f'\\{char}')
+        
+        # Placeholder'ları geri getir
+        for placeholder, original in placeholders.items():
+            text = text.replace(placeholder, original)
+        
+        return text
+    
     DIRECTION_EMOJI = {
         'LONG': '📈',
         'SHORT': '📉',
@@ -747,23 +893,32 @@ class MessageFormatter:
             direction_text = self.DIRECTION_TR.get(direction, direction)
 
             def fmt_price(price: float) -> str:
+                """Fiyatı monospace (code block) formatında döndürür - tek tıkla kopyalama için."""
                 if price is None:
                     return "-"
                 if abs(price) >= 1:
-                    return f"${price:,.2f}"
-                return f"${price:,.6f}"
+                    return f"`${price:,.2f}`"
+                return f"`${price:,.6f}`"
 
             def fmt_money_2(price: float) -> str:
+                """Para miktarını monospace formatında döndürür."""
                 try:
-                    return f"${float(price):,.2f}"
+                    return f"`${float(price):,.2f}`"
                 except Exception:
-                    return "$-"
+                    return "`$-`"
 
-            # Fark yüzdesi (anlık - sinyal)
+            # PNL (Kar/Zarar) hesaplama - Direction'a göre doğru formül
             try:
-                diff_pct = ((now_price - signal_price) / signal_price) * 100 if signal_price else 0.0
+                if direction == 'LONG':
+                    # LONG: Fiyat yükseldiğinde kar (pozitif)
+                    pnl_pct = ((now_price - signal_price) / signal_price) * 100 if signal_price else 0.0
+                elif direction == 'SHORT':
+                    # SHORT: Fiyat düştüğünde kar (pozitif) - ÖNEMLİ: Ters formül
+                    pnl_pct = ((signal_price - now_price) / signal_price) * 100 if signal_price else 0.0
+                else:
+                    pnl_pct = 0.0
             except Exception:
-                diff_pct = 0.0
+                pnl_pct = 0.0
 
             direction_title = self.DIRECTION_TITLE.get(direction, direction.upper())
             strategy_type = signal_data.get('strategy_type', 'trend')
@@ -783,75 +938,47 @@ class MessageFormatter:
             current_price_time = current_price_timestamp if current_price_timestamp is not None else int(time.time())
             current_time_str = self._format_timestamp_with_seconds(current_price_time)
 
-            # Başlık ve ana bilgiler
-            # 4H Teyit bilgisini başlığa ekle
-            # Güven yüzdesi değişikliği gösterimi (eğer significant ise)
-            confidence_change_text = ""
-            if confidence_change is not None and abs(confidence_change) >= 0.01:
-                # %1'den büyük değişiklikler göster
-                confidence_change_pct = confidence_change * 100
-                if confidence_change > 0:
-                    confidence_change_text = f" (🟢 +{confidence_change_pct:.1f}%)"
-                elif confidence_change < 0:
-                    confidence_change_text = f" (🔴 {confidence_change_pct:.1f}%)"
-            
-            header_line = f"🔮 {direction_title} Sinyali: {symbol} {direction_emoji} (Güven: {confidence_pct}%{confidence_change_text})"
-            if is_ranging_strategy:
-                header_line += " [Mean Reversion]"
-            if forecast_text != 'N/A':
-                header_line += f" (4H Teyit: {forecast_text})"
+            # Başlık - Kısa ve öz
+            direction_color = '🔴' if direction == 'SHORT' else '🟢'
+            header_line = f"{direction_color} {direction_title} | {symbol}"
             lines = [header_line]
+            lines.append("➖➖➖➖➖➖➖➖➖")
+            lines.append("")
             
-            # Sinyal ID ekle (varsa)
-            if signal_id:
-                lines.append(f"🆔 Sinyal ID: {signal_id}")
-                lines.append("")  # Boş satır
+            # Giriş ve Güncel Fiyat
+            lines.append(f"**Giriş:** {fmt_price(signal_price)} (Sinyal)")
+            lines.append(f"**Güncel:** {fmt_price(now_price)}")
             
-            # Fark işareti
-            diff_sign = ''
-            if now_price < signal_price:
-                diff_sign = '-'
-            elif now_price > signal_price:
-                diff_sign = '+'
-            diff_amount = abs(now_price - signal_price) if signal_price and now_price else 0.0
+            # PNL (Kar/Zarar) - Direction'a göre doğru gösterim
+            pnl_emoji = '✅' if pnl_pct > 0 else '❌' if pnl_pct < 0 else '🔁'
+            pnl_status = "Kar" if pnl_pct > 0 else "Zarar" if pnl_pct < 0 else "Nötr"
             
-            # Emoji seçimi (direction ve farka göre)
-            diff_emoji = '🔁'  # Default
-            if abs(diff_pct) > 0.01:  # Fark sıfır değilse (küçük yuvarlama hatalarını göz ardı et)
+            # Para miktarı hesapla
+            try:
                 if direction == 'LONG':
-                    if diff_pct > 0:
-                        diff_emoji = '😊'  # LONG + pozitif = iyi
-                    else:
-                        diff_emoji = '😠'  # LONG + negatif = kötü
-                elif direction == 'SHORT':
-                    if diff_pct < 0:
-                        diff_emoji = '😊'  # SHORT + negatif = iyi (fiyat düşmüş)
-                    else:
-                        diff_emoji = '😠'  # SHORT + pozitif = kötü (fiyat yükselmiş)
+                    pnl_amount = now_price - signal_price
+                else:  # SHORT
+                    pnl_amount = signal_price - now_price
+            except Exception:
+                pnl_amount = 0.0
             
-            # Geçen süre hesapla
+            lines.append(f"**Durum:** {pnl_emoji} **{pnl_pct:+.2f}%** ({pnl_status})")
+            if abs(pnl_amount) > 0.01:
+                lines.append(f"**PNL:** {fmt_money_2(pnl_amount)}")
+            
+            # Geçen süre
             signal_created_at = created_at if created_at else int(time.time())
             elapsed_time_str = self._format_time_elapsed(signal_created_at, current_price_time)
-            
-            # Fark satırını oluştur
-            diff_line = f"{diff_emoji} Fark: {diff_pct:+.2f}% | {diff_sign}{fmt_money_2(diff_amount)}"
             if elapsed_time_str != "-":
-                diff_line += f" | ({elapsed_time_str})"
+                lines.append(f"⏱ *{elapsed_time_str}*")
             
-            lines.extend([
-                f"⏰ Sinyal Geliş Zamanı: {signal_time_str}",
-                f"📍 Sinyal Fiyatı: {fmt_price(signal_price)}",
-                "",
-                f"📍 Güncel Fiyat: {fmt_price(now_price)} ({current_time_str})",
-                diff_line,
-                "",
-            ])
+            lines.append("")
 
             atr = entry_levels.get('atr')
             timeframe = entry_levels.get('timeframe') or ''
 
             # TP seviyeleri (R:R 1:1, 1:2, 1:3) - ÖNCE
-            lines.append("🎯 TP Seviyeleri:")
+            lines.append("🎯 **HEDEFLER**")
             if is_ranging_strategy:
                 for idx, key in enumerate(['tp1', 'tp2', 'tp3'], start=1):
                     target_info = custom_targets.get(key)
@@ -870,7 +997,7 @@ class MessageFormatter:
                     hit_status = bool(tp_hits and tp_hits.get(idx, False))
                     hit_emoji = "✅" if hit_status else "⏳"
                     label = target_info.get('label', f"TP{idx}")
-                    lines.append(f"   {label}: {fmt_price(price)} ({tp_pct:+.2f}%) {hit_emoji}")
+                    lines.append(f"{idx}️⃣ {fmt_price(price)} ({tp_pct:+.2f}%) {hit_emoji}")
             else:
                 # Risk mesafesi: ATR 1.0 (veya %1 fallback)
                 if atr:
@@ -898,8 +1025,9 @@ class MessageFormatter:
                 lines.extend(tps)
             lines.append("")
             
+            lines.append("")
             # SL seviyeleri
-            lines.append("🛡️ Stop-Loss Seviyeleri:")
+            lines.append("🛡 **STOP LOSS**")
             sl_levels = []
             multipliers = [1.0, 1.5, 2.0]
             sl_keys_order = ['1', '1.5', '2']
@@ -936,7 +1064,9 @@ class MessageFormatter:
                     # SL hit olduğunda ❌ (zarar demek, kötü bir şey)
                     hit_emoji = "❌" if sl_hits and (sl_hits.get('2') or sl_hits.get('stop')) else "⏳"
                     label = stop_info.get('label', 'Stop-Loss')
-                    sl_levels.append(f"   {label}: {fmt_price(stop_price)} ({sl_pct:+.2f}%) {hit_emoji}")
+                    # Risk yüzdesini hesapla
+                    risk_pct = abs(sl_pct)
+                    sl_levels.append(f"⛔️ {fmt_price(stop_price)} (Risk: {risk_pct:.1f}%) {hit_emoji}")
                     if sl_hits:
                         for key, value in sl_hits.items():
                             normalized_key = _normalize_sl_key(str(key))
@@ -1084,15 +1214,35 @@ class MessageFormatter:
             # Tüm hit entries'i timestamp'e göre sırala
             timeline.sort(key=lambda item: item[0])
 
-            # Sinyal günlüğü bölümü (hit varsa listele, yoksa bilgi ver)
-            lines.append("📝 Sinyal Günlüğü:")
+            # Sinyal günlüğü bölümü (sadece hit varsa göster)
             if timeline:
+                lines.append("")
+                lines.append("📝 **Sinyal Günlüğü:**")
                 for ts, desc in timeline:
                     lines.append(f"{self._format_timestamp_with_seconds(ts)} - {desc}")
-            else:
-                lines.append("Henüz kayıt yok")
 
-            return '\n'.join(lines)
+            # Teknik detaylar (footer)
+            lines.append("")
+            lines.append("📊 **Teknik Detay**")
+            strategy_name = "Mean Reversion" if is_ranging_strategy else "Trend Following"
+            lines.append(f"strateji: `{strategy_name}`")
+            lines.append(f"güven: `{confidence_pct}%`")
+            if forecast_text != 'N/A':
+                lines.append(f"4h_teyit: `{forecast_text}`")
+
+            # Mesajı birleştir
+            message = '\n'.join(lines)
+            
+            # Markdown hatalarını önlemek için escape et
+            # Code block'ları koruyarak akıllı escape yap
+            try:
+                message = self._escape_markdown_v2_smart(message, preserve_code_blocks=True)
+            except Exception as e:
+                self.logger.warning(f"Markdown escape hatası, mesaj olduğu gibi gönderilecek: {str(e)}")
+                # Hata durumunda en azından kritik karakterleri escape et
+                message = message.replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]')
+            
+            return message
             
         except Exception as e:
             self.logger.error(f"Signal alert formatlama hatası: {str(e)}", exc_info=True)
