@@ -65,6 +65,7 @@ class SignalGenerator:
                     f"Bitcoin Kraldır filtresi aktif."
                 )
                 return None
+            # market_state == 'NEUTRAL' durumunda _check_global_market_condition içinde zaten log basılıyor
         
         tf_signals = {}
         self.logger.debug(f"generate_signal: symbol={symbol}, tfs={list(multi_tf_data.keys())}")
@@ -84,22 +85,26 @@ class SignalGenerator:
         
         # 2. Intraday Circuit Breaker (4h EMA kontrolü)
         if combined_signal and combined_signal.get('direction') == 'LONG':
-            if self._check_intraday_circuit_breaker(multi_tf_data):
+            circuit_breaker_active = self._check_intraday_circuit_breaker(multi_tf_data)
+            if circuit_breaker_active:
                 self.logger.warning(
                     f"{symbol} LONG sinyali reddedildi: Intraday circuit breaker aktif. "
                     f"Serbest düşüş tespit edildi."
                 )
                 return None
+            # circuit_breaker_active == False durumunda _check_intraday_circuit_breaker içinde zaten log basılıyor
         
         # 3. Volume Climax Check (Ranging LONG için)
         if combined_signal and combined_signal.get('strategy_type') == 'ranging':
             if combined_signal.get('direction') == 'LONG':
-                if not self._check_volume_climax(multi_tf_data):
+                volume_climax_ok = self._check_volume_climax(multi_tf_data)
+                if not volume_climax_ok:
                     self.logger.warning(
                         f"{symbol} Ranging LONG sinyali reddedildi: Volume climax yok. "
                         f"Düşük hacimli düşüş - panik satışlar bitmemiş."
                     )
                     return None
+                # volume_climax_ok == True durumunda _check_volume_climax içinde zaten log basılıyor
         
         self.logger.debug(
             f"combined: direction={combined_signal['direction']}, "
@@ -358,9 +363,11 @@ class SignalGenerator:
         if ranging_candidates:
             dominant_signal = max(ranging_candidates, key=lambda s: s.get('confidence', 0))
             self.logger.info(
-                f"Ranging stratejisi seçildi: direction={dominant_signal['direction']}, "
+                f"✅ Trend Veto GEÇİLDİ: Ranging sinyali onaylandı. "
+                f"Direction={dominant_signal['direction']}, "
                 f"confidence={dominant_signal['confidence']:.3f}, "
-                f"daily_trend={daily_trend} (ADX={daily_adx:.1f})"
+                f"Günlük Trend: {daily_trend} (ADX={daily_adx:.1f}). "
+                f"Çelişki veya crash riski bulunmadı."
             )
             return {
                 'direction': dominant_signal['direction'],
@@ -386,6 +393,14 @@ class SignalGenerator:
             weighted_scores, key=weighted_scores.get
         )
         final_confidence = weighted_scores[final_direction]
+        
+        # Trend stratejisi seçildi - pozitif durum bildirimi
+        self.logger.info(
+            f"✅ Trend Veto GEÇİLDİ: Trend stratejisi seçildi. "
+            f"Direction={final_direction}, confidence={final_confidence:.3f}, "
+            f"Günlük Trend: {daily_trend} (ADX={daily_adx:.1f}). "
+            f"Ranging sinyali yok veya veto mekanizmasından geçemedi."
+        )
         
         # Score breakdown ve market context: 4h öncelikli, yoksa fallback
         selected_score_breakdown = None
@@ -621,6 +636,11 @@ class SignalGenerator:
                 )
                 return 'BEARISH_CRASH'
             
+            # Tüm kontroller geçildi - pozitif durum bildirimi
+            self.logger.info(
+                f"✅ BTC Correlation Check GEÇİLDİ: BTC 24h Change={change_24h:.2f}%, "
+                f"RSI={rsi_value:.1f}. Piyasa güvenli."
+            )
             return 'NEUTRAL'
             
         except Exception as e:
@@ -668,8 +688,21 @@ class SignalGenerator:
                         f"Serbest düşüş tespit edildi."
                     )
                     return True
-            
-            return False
+                else:
+                    # Fiyat EMA50'nin altında ama fark %5'ten az - güvenli bölge
+                    self.logger.info(
+                        f"✅ Circuit Breaker Check GEÇİLDİ: Fiyat EMA50'nin altında ama güvenli bölgede. "
+                        f"Fark: %{price_diff_pct:.2f} (Limit: %5.0)"
+                    )
+                    return False
+            else:
+                # Fiyat EMA50'nin üzerinde - güvenli bölge
+                price_diff_pct = ((current_price - ema_50) / ema_50) * 100
+                self.logger.info(
+                    f"✅ Circuit Breaker Check GEÇİLDİ: Fiyat EMA50'nin üzerinde. "
+                    f"Fark: %{price_diff_pct:.2f} (Limit: %5.0)"
+                )
+                return False
             
         except Exception as e:
             self.logger.error(
@@ -708,14 +741,14 @@ class SignalGenerator:
             # Hacim en az 1.5 kat olmalı (volume climax)
             if relative_volume >= 1.5:
                 self.logger.info(
-                    f"Volume climax check: Relative volume={relative_volume:.2f} >= 1.5. "
+                    f"✅ Volume Climax Check GEÇİLDİ: Relative volume={relative_volume:.2f} >= 1.5. "
                     f"Panik satışlar bitti, alıcılar güçlü."
                 )
                 return True
             else:
-                self.logger.debug(
+                self.logger.info(
                     f"Volume climax check: Relative volume={relative_volume:.2f} < 1.5. "
-                    f"Yeterli hacim yok."
+                    f"Yeterli hacim yok - panik satışlar devam ediyor olabilir."
                 )
                 return False
                 
