@@ -90,6 +90,9 @@ class SignalScannerManager:
         try:
             self.logger.info("Sinyal tarama başlatıldı")
             
+            # Piyasa Nabzı Raporu (Market Pulse Log) - Tarama başında
+            self._log_market_pulse()
+            
             # Top 20 futures coin'i al
             symbols = self.coin_filter.get_top_futures_coins(20)
             
@@ -169,9 +172,10 @@ class SignalScannerManager:
                 
                 # Total score threshold kontrolü (bonuslar dahil)
                 if total_score < self.confidence_threshold:
-                    self.logger.debug(
-                        f"{symbol} total score düşük: {total_score:.3f} "
-                        f"(base={base_score:.3f}, rsi={rsi_bonus:.3f}, vol={volume_bonus:.3f})"
+                    # Reddedilme Karnesi (Rejection Scorecard) - Detaylı log
+                    self._log_rejection_scorecard(
+                        symbol, total_score, self.confidence_threshold,
+                        signal_data, ranking_info
                     )
                     return
             else:
@@ -183,7 +187,11 @@ class SignalScannerManager:
                 
                 # Eski yöntem: sadece confidence kontrolü
                 if overall_confidence < self.confidence_threshold:
-                    self.logger.debug(f"{symbol} confidence düşük: {overall_confidence:.3f}")
+                    # Reddedilme Karnesi (Rejection Scorecard) - Detaylı log
+                    self._log_rejection_scorecard(
+                        symbol, overall_confidence, self.confidence_threshold,
+                        signal_data, None
+                    )
                     return
 
             # NEUTRAL yönlü sinyaller kanala gönderilmez (UX/gürültü kontrolü)
@@ -973,3 +981,163 @@ class SignalScannerManager:
         
         if symbols_to_remove:
             self.logger.info(f"{len(symbols_to_remove)} eski cache girişi temizlendi")
+    
+    def _log_rejection_scorecard(
+        self,
+        symbol: str,
+        score: float,
+        threshold: float,
+        signal_data: Dict,
+        ranking_info: Optional[Dict] = None
+    ) -> None:
+        """
+        Reddedilme Karnesi (Rejection Scorecard) - Detaylı log.
+        
+        Args:
+            symbol: Trading pair
+            score: Toplam skor (confidence)
+            threshold: Minimum eşik değeri
+            signal_data: Sinyal verisi (score_breakdown, market_context içerir)
+            ranking_info: Ranking bilgileri (opsiyonel)
+        """
+        try:
+            score_breakdown = signal_data.get('score_breakdown', {})
+            market_context = signal_data.get('market_context', {})
+            direction = signal_data.get('direction', 'UNKNOWN')
+            
+            # RSI bilgisi
+            rsi_value = score_breakdown.get('rsi_value', 0)
+            rsi_signal = score_breakdown.get('rsi_signal', 'NEUTRAL')
+            rsi_status = self._get_indicator_status(rsi_signal, direction, rsi_value)
+            
+            # Trend bilgisi
+            adx_value = score_breakdown.get('adx_value', 0)
+            adx_signal = score_breakdown.get('adx_signal', 'NEUTRAL')
+            trend_status = self._get_trend_status(adx_signal, direction, adx_value)
+            
+            # Hacim bilgisi
+            volume_relative = score_breakdown.get('volume_relative', 1.0)
+            volume_signal = score_breakdown.get('volume_signal', 'NEUTRAL')
+            volume_status = self._get_volume_status(volume_relative, volume_signal)
+            
+            # Bonus bilgileri (eğer varsa)
+            base_score = ranking_info.get('base_score', score) if ranking_info else score
+            rsi_bonus = ranking_info.get('rsi_bonus', 0.0) if ranking_info else 0.0
+            volume_bonus = ranking_info.get('volume_bonus', 0.0) if ranking_info else 0.0
+            
+            # Log mesajı oluştur
+            log_lines = [
+                f"❌ {symbol} Sinyali Yetersiz (Puan: {score:.2f} / Eşik: {threshold:.2f})",
+                f"📊 Karne:",
+                f"   • Yön: {direction}",
+                f"   • Base Score: {base_score:.3f}",
+            ]
+            
+            if rsi_bonus != 0.0 or volume_bonus != 0.0:
+                log_lines.append(f"   • RSI Bonus: {rsi_bonus:+.3f}")
+                log_lines.append(f"   • Volume Bonus: {volume_bonus:+.3f}")
+            
+            log_lines.extend([
+                f"   • RSI: {rsi_status} (Değer: {rsi_value:.1f})",
+                f"   • Trend: {trend_status} (ADX: {adx_value:.1f})",
+                f"   • Hacim: {volume_status} (Ortalamanın {volume_relative*100:.0f}%)"
+            ])
+            
+            # Market context bilgileri
+            regime = market_context.get('regime', 'unknown')
+            volatility = market_context.get('volatility_percentile', 0)
+            log_lines.append(f"   • Piyasa Rejimi: {regime.upper()}")
+            log_lines.append(f"   • Volatilite: {volatility:.1f}%")
+            
+            self.logger.info("\n".join(log_lines))
+            
+        except Exception as e:
+            # Hata durumunda basit log
+            self.logger.debug(
+                f"{symbol} confidence düşük: {score:.3f} (scorecard hatası: {str(e)})"
+            )
+    
+    def _get_indicator_status(self, signal: str, direction: str, value: float) -> str:
+        """İndikatör durumunu formatla."""
+        if signal == direction:
+            return f"✅ Uyumlu ({signal})"
+        elif signal == 'NEUTRAL':
+            return f"⚪ Nötr"
+        else:
+            return f"❌ Ters ({signal})"
+    
+    def _get_trend_status(self, signal: str, direction: str, adx_value: float) -> str:
+        """Trend durumunu formatla."""
+        if signal == direction:
+            if adx_value > 25:
+                return f"✅ Güçlü Trend ({signal})"
+            else:
+                return f"⚠️ Zayıf Trend ({signal})"
+        elif signal == 'NEUTRAL':
+            return f"⚪ Nötr"
+        else:
+            return f"❌ Ters Trend ({signal})"
+    
+    def _get_volume_status(self, relative: float, signal: str) -> str:
+        """Hacim durumunu formatla."""
+        if relative >= 1.5:
+            return f"✅ Yüksek (x{relative:.2f})"
+        elif relative >= 1.0:
+            return f"⚪ Normal (x{relative:.2f})"
+        else:
+            return f"❌ Düşük (x{relative:.2f})"
+    
+    def _log_market_pulse(self) -> None:
+        """
+        Piyasa Nabzı Raporu (Market Pulse Log) - Genel piyasa durumunu özetler.
+        """
+        try:
+            from datetime import datetime
+            
+            # BTC durumunu kontrol et
+            btc_ticker = None
+            btc_status = "Bilinmiyor"
+            btc_change_24h = 0.0
+            btc_rsi = 0.0
+            
+            try:
+                if self.cmd_handler and self.cmd_handler.market_data:
+                    btc_ticker = self.cmd_handler.market_data.get_ticker_info("BTC/USDT")
+                    if btc_ticker:
+                        btc_change_24h = float(btc_ticker.get('priceChangePercent', 0))
+                        # RSI için 1h veri çek
+                        btc_1h_data = self.cmd_handler.market_data.get_klines("BTC/USDT", "1h", limit=200)
+                        if btc_1h_data is not None and len(btc_1h_data) > 0:
+                            from analysis.technical_indicators import TechnicalIndicatorCalculator
+                            indicator_calc = TechnicalIndicatorCalculator()
+                            indicators = indicator_calc.calculate_all(btc_1h_data)
+                            rsi_data = indicators.get('rsi', {})
+                            btc_rsi = rsi_data.get('value', 0)
+                        
+                        # BTC durumunu belirle
+                        if btc_change_24h < -3.0 or btc_rsi < 30:
+                            btc_status = "⚠️ Çöküş Riski"
+                        elif btc_change_24h < -1.0:
+                            btc_status = "⚠️ Düşüş"
+                        elif btc_change_24h > 3.0:
+                            btc_status = "✅ Güçlü Yükseliş"
+                        elif btc_change_24h > 1.0:
+                            btc_status = "✅ Yükseliş"
+                        else:
+                            btc_status = "⚪ Güvenli"
+            except Exception as e:
+                self.logger.debug(f"BTC durumu kontrolü hatası: {str(e)}")
+            
+            # Zaman bilgisi
+            current_time = datetime.now().strftime("%H:%M")
+            
+            # Log mesajı
+            log_lines = [
+                f"🌍 PİYASA NABZI ({current_time}):",
+                f"   • BTC Durumu: {btc_status} (24h: {btc_change_24h:+.2f}%, RSI: {btc_rsi:.1f})"
+            ]
+            
+            self.logger.info("\n".join(log_lines))
+            
+        except Exception as e:
+            self.logger.debug(f"Piyasa nabzı raporu hatası: {str(e)}")
