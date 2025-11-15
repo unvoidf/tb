@@ -1106,7 +1106,7 @@ class SignalScannerManager:
                     if btc_ticker:
                         btc_change_24h = float(btc_ticker.get('priceChangePercent', 0))
                         # RSI için 1h veri çek
-                        btc_1h_data = self.cmd_handler.market_data.get_klines("BTC/USDT", "1h", limit=200)
+                        btc_1h_data = self.cmd_handler.market_data.fetch_ohlcv("BTC/USDT", "1h", limit=200)
                         if btc_1h_data is not None and len(btc_1h_data) > 0:
                             from analysis.technical_indicators import TechnicalIndicatorCalculator
                             indicator_calc = TechnicalIndicatorCalculator()
