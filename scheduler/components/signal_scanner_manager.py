@@ -1104,7 +1104,11 @@ class SignalScannerManager:
                 if self.cmd_handler and self.cmd_handler.market_data:
                     btc_ticker = self.cmd_handler.market_data.get_ticker_info("BTC/USDT")
                     if btc_ticker:
-                        btc_change_24h = float(btc_ticker.get('priceChangePercent', 0))
+                        # CCXT standart alanı: 'percentage' (SignalGenerator ile tutarlı)
+                        btc_change_24h = float(btc_ticker.get('percentage', 0) or 0)
+                        # Eğer 'percentage' yoksa, 'info' içindeki ham veriye bak
+                        if btc_change_24h == 0 and 'info' in btc_ticker:
+                            btc_change_24h = float(btc_ticker['info'].get('priceChangePercent', 0) or 0)
                         # RSI için 1h veri çek
                         btc_1h_data = self.cmd_handler.market_data.fetch_ohlcv("BTC/USDT", "1h", limit=200)
                         if btc_1h_data is not None and len(btc_1h_data) > 0:
