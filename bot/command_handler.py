@@ -2,7 +2,7 @@
 CommandHandler: Telegram bot komutlarını işler.
 /trend, /analiz ve /ayarlar komutlarını yönetir.
 """
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union, Tuple
 from datetime import datetime
 import time
 from utils.logger import LoggerManager
@@ -414,15 +414,16 @@ class CommandHandler:
         """
         return self.user_notifications.get(user_id, True)
     
-    def _analyze_symbol(self, symbol: str) -> Optional[Dict]:
+    def _analyze_symbol(self, symbol: str, return_reason: bool = False) -> Union[Optional[Dict], Tuple[Optional[Dict], str]]:
         """
         Tek sembol için multi-timeframe analiz yapar.
         
         Args:
             symbol: Trading pair
+            return_reason: True ise (signal, reason) tuple döndürür
             
         Returns:
-            Sinyal bilgisi veya None
+            Sinyal bilgisi veya None (veya tuple)
         """
         # Multi-timeframe veri çek
         multi_tf_data = self.market_data.fetch_multi_timeframe(
@@ -430,10 +431,14 @@ class CommandHandler:
         )
         
         if not multi_tf_data:
+            if return_reason:
+                return None, "NO_DATA"
             return None
         
         # Sinyal üret (symbol parametresi eklendi)
-        signal = self.signal_gen.generate_signal(multi_tf_data, symbol=symbol)
+        signal = self.signal_gen.generate_signal(
+            multi_tf_data, symbol=symbol, return_reason=return_reason
+        )
         
         return signal
 

@@ -85,53 +85,78 @@ class SignalScannerManager:
     
     def scan_for_signals(self) -> None:
         """
-        Top 20 futures coin'i tarar ve güçlü sinyalleri yakalar.
+        Top Futures coin'i tarar (Hibrit: Majors + Radar).
         """
         try:
-            self.logger.info("Sinyal tarama başlatıldı")
+            self.logger.info("Sinyal tarama başlatıldı (Hibrit Mod)")
             
             # Piyasa Nabzı Raporu (Market Pulse Log) - Tarama başında
             self._log_market_pulse()
             
-            # Top 20 futures coin'i al
-            symbols = self.coin_filter.get_top_futures_coins(20)
+            # Hibrit Tarama Listesi (Count = 50)
+            symbols = self.coin_filter.get_top_futures_coins(50)
             
             if not symbols:
                 self.logger.warning("Futures coin listesi alınamadı")
                 return
             
-            self.logger.debug(f"Taranacak coinler: {symbols}")
+            # İstatistikler
+            stats = {
+                'TOTAL_SCANNED': 0,
+                'GENERATED': 0,
+                'REJECTED_RR': 0,
+                'REJECTED_TREND': 0,
+                'REJECTED_CONFIDENCE': 0,
+                'REJECTED_BTC': 0,
+                'REJECTED_HIGH_VOLATILITY': 0,
+                'NO_SIGNAL': 0
+            }
             
             # Her coin için sinyal kontrolü
             for symbol in symbols:
                 try:
-                    self._check_symbol_signal(symbol)
+                    stats['TOTAL_SCANNED'] += 1
+                    self._check_symbol_signal(symbol, stats)
                 except Exception as e:
                     self.logger.error(f"{symbol} sinyal kontrolü hatası: {str(e)}", exc_info=True)
             
+            # Tarama Özeti Raporu
+            self._log_scan_summary(stats)
             self.logger.info("Sinyal tarama tamamlandı")
             
         except Exception as e:
             self.logger.error(f"Sinyal tarama hatası: {str(e)}", exc_info=True)
     
-    def _check_symbol_signal(self, symbol: str) -> None:
+    def _check_symbol_signal(self, symbol: str, stats: Dict = None) -> None:
         """
         Tek bir coin için sinyal kontrolü yapar.
         
         Args:
             symbol: Trading pair (örn: BTC/USDT)
+            stats: İstatistik dict (referans olarak güncellenir)
         """
         try:
-            # Coin için sinyal analizi yap
-            signal_data = self.cmd_handler._analyze_symbol(symbol)
+            # Coin için sinyal analizi yap (return_reason=True ile)
+            signal_data, reason = self.cmd_handler._analyze_symbol(symbol, return_reason=True)
             
             if not signal_data:
-                self.logger.debug(f"{symbol} için sinyal verisi yok")
+                self.logger.debug(f"{symbol} için sinyal verisi yok (Reason: {reason})")
+                
+                if stats:
+                    if reason == 'FILTER_R_R':
+                        stats['REJECTED_RR'] += 1
+                    elif reason == 'FILTER_BTC_CRASH':
+                        stats['REJECTED_BTC'] += 1
+                    elif reason in ('FILTER_CIRCUIT_BREAKER', 'FILTER_VOLUME_CLIMAX', 'FILTER_BREAKOUT', 'FILTER_BREAKDOWN'):
+                        stats['REJECTED_TREND'] += 1
+                    else:
+                        stats['NO_SIGNAL'] += 1
                 return
             
             # DEBUG: Type check
             if not isinstance(signal_data, dict):
                 self.logger.error(f"{symbol} signal_data is NOT a dict! Type: {type(signal_data)}, Value: {signal_data}")
+                if stats: stats['NO_SIGNAL'] += 1
                 return
             
             # Genel sinyal bilgilerini al
@@ -161,13 +186,20 @@ class SignalScannerManager:
 
                 # BUG FIX: Raporlanan güven skorunu, bonuslar dahil edilmiş total_score ile güncelle.
                 # Bu, filtrelenen skor ile kullanıcıya gösterilen skorun aynı olmasını sağlar.
-                signal_data['confidence'] = total_score
+                # Confidence değeri %100'ü aşamaz (1.0 cap)
+                capped_confidence = min(total_score, 1.0)
+                signal_data['confidence'] = capped_confidence
+                
+                if total_score > 1.0:
+                    self.logger.warning(
+                        f"{symbol} total_score {total_score:.3f} > 1.0, confidence {capped_confidence:.3f} olarak cap'lendi"
+                    )
                 
                 self.logger.debug(
                     f"{symbol} sinyal: direction={overall_direction}, "
-                    f"confidence={overall_confidence:.3f}, "
+                    f"base_confidence={overall_confidence:.3f}, "
                     f"rsi_bonus={rsi_bonus:.3f}, volume_bonus={volume_bonus:.3f}, "
-                    f"total_score={total_score:.3f}"
+                    f"total_score={total_score:.3f}, capped_confidence={capped_confidence:.3f}"
                 )
                 
                 # Total score threshold kontrolü (bonuslar dahil)
@@ -177,6 +209,7 @@ class SignalScannerManager:
                         symbol, total_score, self.confidence_threshold,
                         signal_data, ranking_info
                     )
+                    if stats: stats['REJECTED_CONFIDENCE'] += 1
                     return
             else:
                 # Rank edilemedi (threshold altı)
@@ -192,6 +225,7 @@ class SignalScannerManager:
                         symbol, overall_confidence, self.confidence_threshold,
                         signal_data, None
                     )
+                    if stats: stats['REJECTED_CONFIDENCE'] += 1
                     return
 
             # NEUTRAL yönlü sinyaller kanala gönderilmez (UX/gürültü kontrolü)
@@ -199,14 +233,59 @@ class SignalScannerManager:
                 self.logger.debug(
                     f"{symbol} sinyali NEUTRAL (score={total_score:.3f}); kanal bildirimi atlandı"
                 )
+                if stats: stats['NO_SIGNAL'] += 1 # NEUTRAL teknik olarak sinyal değil
                 return
             
-            # RANGING PİYASA FİLTRESİ (Finans Uzmanı Önerisi)
-            # Yatay piyasada sadece yüksek güvenli sinyaller geçsin
+            # TREND-YÖN UYUMSUZLUĞU KONTROLÜ (Finans Uzmanı Önerisi)
+            # LONG sinyali trending_down'da, SHORT sinyali trending_up'da reddedilmeli
             market_context = signal_data.get('market_context', {})
             regime = market_context.get('regime')
             adx_strength = market_context.get('adx_strength', 0)
             
+            if regime == 'trending_down' and overall_direction == 'LONG':
+                self.logger.info(
+                    f"{symbol} LONG sinyali reddedildi: Market regime 'trending_down' "
+                    f"(ADX={adx_strength:.1f}). Trend-yön uyumsuzluğu."
+                )
+                if stats: stats['REJECTED_TREND'] += 1
+                return
+            
+            if regime == 'trending_up' and overall_direction == 'SHORT':
+                self.logger.info(
+                    f"{symbol} SHORT sinyali reddedildi: Market regime 'trending_up' "
+                    f"(ADX={adx_strength:.1f}). Trend-yön uyumsuzluğu."
+                )
+                if stats: stats['REJECTED_TREND'] += 1
+                return
+            
+            # VOLATİLİTE FİLTRESİ (Finans Uzmanı Önerisi)
+            # Aşırı volatil coinlerde sinyal gücünü düşür veya reddet
+            volatility_percentile = market_context.get('volatility_percentile', 50.0)
+            if volatility_percentile > 80:
+                # Yüksek volatilite: Confidence penalty uygula
+                volatility_penalty = 0.85  # %15 düşür
+                penalized_score = total_score * volatility_penalty
+                
+                # Penalty sonrası threshold altına düştüyse reddet
+                if penalized_score < self.confidence_threshold:
+                    self.logger.info(
+                        f"{symbol} sinyali reddedildi: Yüksek volatilite "
+                        f"(percentile={volatility_percentile:.1f}%). "
+                        f"Score: {total_score:.3f} -> {penalized_score:.3f} (penalty sonrası)"
+                    )
+                    if stats: stats['REJECTED_HIGH_VOLATILITY'] = stats.get('REJECTED_HIGH_VOLATILITY', 0) + 1
+                    return
+                else:
+                    # Penalty uygula ama sinyali kabul et
+                    total_score = penalized_score
+                    signal_data['confidence'] = min(total_score, 1.0)
+                    self.logger.info(
+                        f"{symbol} yüksek volatilite penalty uygulandı: "
+                        f"{volatility_percentile:.1f}% -> score {total_score:.3f}"
+                    )
+            
+            # RANGING PİYASA FİLTRESİ (Finans Uzmanı Önerisi)
+            # Yatay piyasada sadece yüksek güvenli sinyaller geçsin
             if regime == 'ranging' or adx_strength < 25:
                 # Ranging piyasada veya zayıf trend gücünde threshold yükselt
                 ranging_threshold = 0.8
@@ -215,7 +294,11 @@ class SignalScannerManager:
                         f"{symbol} ranging/zayıf trend (ADX={adx_strength:.1f}), "
                         f"score={total_score:.3f} < {ranging_threshold}, atlandı"
                     )
+                    if stats: stats['REJECTED_CONFIDENCE'] += 1 # Yüksek threshold'a takıldı
                     return
+
+            # Başarılı sinyal
+            if stats: stats['GENERATED'] += 1
 
             # _temp_signal_data'yı doldur (rejected signal kaydı için)
             if not hasattr(self, '_temp_signal_data'):
@@ -234,6 +317,7 @@ class SignalScannerManager:
             
         except Exception as e:
             self.logger.error(f"{symbol} sinyal kontrolü hatası: {str(e)}", exc_info=True)
+
     
     def _should_send_notification(self, symbol: str, direction: str) -> bool:
         """
@@ -663,14 +747,18 @@ class SignalScannerManager:
         tp_levels = {}
         sl_levels = {}
         
-        # TP seviyeleri (R:R 1:1, 1:2, 1:3)
+        # TP seviyeleri (Dengeli Yaklaşım: TP1=1.5R, TP2=2.5R)
+        # TP1 = 3x ATR (1.5R), TP2 = 5x ATR (2.5R)
+        # SL = 2x ATR olduğu için TP1'in R:R oranı 1.5R, TP2'nin R:R oranı 2.5R olur
         if atr:
             risk_dist = atr
         else:
             risk_dist = signal_price * 0.01
         
-        for rr in [1, 2, 3]:
-            offset = risk_dist * rr
+        # TP multipliers: [3, 5] -> TP1=1.5R, TP2=2.5R (SL=2x ATR bazlı)
+        tp_multipliers = [3, 5]
+        for idx, multiplier in enumerate(tp_multipliers, start=1):
+            offset = risk_dist * multiplier
             if direction == 'LONG':
                 tp_price = signal_price + offset
             elif direction == 'SHORT':
@@ -679,35 +767,30 @@ class SignalScannerManager:
                 tp_price = None
             
             if tp_price:
-                tp_levels[f'tp{rr}_price'] = tp_price
+                tp_levels[f'tp{idx}_price'] = tp_price
         
-        # SL seviyeleri (ATR 1.0, 1.5, 2.0)
-        multipliers = [1.0, 1.5, 2.0]
-        for m in multipliers:
-            if atr:
-                offset = atr * m
-                if direction == 'LONG':
-                    sl_price = signal_price - offset
-                elif direction == 'SHORT':
-                    sl_price = signal_price + offset
-                else:
-                    sl_price = None
+        # SL seviyeleri (Tek SL: 2x ATR)
+        # Dengeli yaklaşım: Sadece SL2 (2x ATR) kullanılır
+        sl_multiplier = 2.0
+        if atr:
+            offset = atr * sl_multiplier
+            if direction == 'LONG':
+                sl_price = signal_price - offset
+            elif direction == 'SHORT':
+                sl_price = signal_price + offset
             else:
-                pct = float(m)
-                if direction == 'LONG':
-                    sl_price = signal_price * (1 - pct/100)
-                elif direction == 'SHORT':
-                    sl_price = signal_price * (1 + pct/100)
-                else:
-                    sl_price = None
-            
-            if sl_price:
-                if m == 1.0:
-                    sl_levels['sl1_price'] = sl_price
-                elif m == 1.5:
-                    sl_levels['sl1_5_price'] = sl_price
-                elif m == 2.0:
-                    sl_levels['sl2_price'] = sl_price
+                sl_price = None
+        else:
+            pct = float(sl_multiplier)
+            if direction == 'LONG':
+                sl_price = signal_price * (1 - pct/100)
+            elif direction == 'SHORT':
+                sl_price = signal_price * (1 + pct/100)
+            else:
+                sl_price = None
+        
+        if sl_price:
+            sl_levels['sl2_price'] = sl_price
         
         return {**tp_levels, **sl_levels}
 
@@ -1145,3 +1228,50 @@ class SignalScannerManager:
             
         except Exception as e:
             self.logger.debug(f"Piyasa nabzı raporu hatası: {str(e)}")
+
+    def _log_scan_summary(self, stats: Dict) -> None:
+        """
+        Tarama Özeti Raporu - Her döngü sonunda reddedilme nedenlerini özetler.
+        """
+        try:
+            total = stats.get('TOTAL_SCANNED', 0)
+            generated = stats.get('GENERATED', 0)
+            rejected_rr = stats.get('REJECTED_RR', 0)
+            rejected_trend = stats.get('REJECTED_TREND', 0)
+            rejected_conf = stats.get('REJECTED_CONFIDENCE', 0)
+            rejected_btc = stats.get('REJECTED_BTC', 0)
+            rejected_volatility = stats.get('REJECTED_HIGH_VOLATILITY', 0)
+            no_signal = stats.get('NO_SIGNAL', 0)
+            
+            log_lines = [
+                f"📊 TARAMA ÖZETİ ({total} Coin)",
+                f"----------------------------------------",
+                f"✅ Sinyal Üretildi: {generated}",
+                f"❌ R/R Yetersiz:    {rejected_rr}  (Fırsat var ama riskli)",
+                f"❌ Trend Uyumsuz:   {rejected_trend}  (Ters işlem koruması)",
+                f"❌ Düşük Güven:     {rejected_conf}  (Sinyal zayıf)",
+                f"❌ Yüksek Volatilite: {rejected_volatility}  (Aşırı volatil coinler)",
+                f"❌ BTC Filtresi:    {rejected_btc}  (Piyasa güvenli)"
+            ]
+            
+            if no_signal > 0:
+                log_lines.append(f"⚪ Sinyal Yok:      {no_signal}  (Teknik sinyal oluşmadı)")
+                
+            log_lines.append(f"----------------------------------------")
+            
+            # Sonuç yorumu
+            if generated > 0:
+                result = "Fırsat bulundu!"
+            elif rejected_btc > 0:
+                result = "BTC kaynaklı risk, işlem açılmadı."
+            elif rejected_rr > 0:
+                result = "Fırsatlar var ama R/R kurtarmıyor."
+            else:
+                result = "Piyasa stabil/yatay, fırsat bekleniyor."
+                
+            log_lines.append(f"Sonuç: {result}")
+            
+            self.logger.info("\n".join(log_lines))
+            
+        except Exception as e:
+            self.logger.error(f"Tarama özeti raporu hatası: {str(e)}")

@@ -112,10 +112,18 @@ class TechnicalIndicatorCalculator:
     
     def _get_rsi_signal(self, rsi: float) -> str:
         """RSI değerine göre sinyal belirler."""
-        if rsi < 45:
-            return 'LONG'
-        elif rsi > 55:
-            return 'SHORT'
+        # Trend takibi için daha geniş aralıklar (Endüstri standardı)
+        # Boğa piyasasında RSI 40-80 arasıdır.
+        # Ayı piyasasında RSI 20-60 arasıdır.
+        
+        if rsi < 30:
+            return 'LONG'  # Oversold (Mean Reversion)
+        elif rsi > 70:
+            return 'SHORT' # Overbought (Mean Reversion)
+        elif 50 < rsi < 70:
+            return 'LONG'  # Bullish Trend Zone
+        elif 30 < rsi < 50:
+            return 'SHORT' # Bearish Trend Zone
         else:
             return 'NEUTRAL'
     
@@ -141,12 +149,12 @@ class TechnicalIndicatorCalculator:
     
     def _get_macd_signal(self, macd: float, signal: float) -> str:
         """MACD değerine göre sinyal belirler."""
+        # Threshold kaldırıldı - Crossover anında sinyal üretilmeli
         diff = macd - signal
-        threshold = abs(signal) * 0.01  # %1 fark yeterli
         
-        if diff > threshold:
+        if diff > 0:
             return 'LONG'
-        elif diff < -threshold:
+        elif diff < 0:
             return 'SHORT'
         else:
             return 'NEUTRAL'
@@ -173,14 +181,14 @@ class TechnicalIndicatorCalculator:
         
         current_price = df['close'].iloc[-1]
         
-        # EMA Strict Alignment kontrolü (4 yapay zeka önerisi)
-        # LONG: short > medium > long olmalı
-        # SHORT: short < medium < long olmalı
+        # EMA Alignment kontrolü (Esnetildi)
+        # LONG: Fiyat EMA Long üstünde ve Short > Medium
+        # SHORT: Fiyat EMA Long altında ve Short < Medium
         aligned = False
-        if ema_short > ema_medium > ema_long:
-            aligned = True  # Bullish alignment
-        elif ema_short < ema_medium < ema_long:
-            aligned = True  # Bearish alignment
+        if current_price > ema_long and ema_short > ema_medium:
+            aligned = True  # Bullish alignment (Trend başı/devamı)
+        elif current_price < ema_long and ema_short < ema_medium:
+            aligned = True  # Bearish alignment (Trend başı/devamı)
         
         return {
             'ema_short': ema_short,
@@ -188,24 +196,31 @@ class TechnicalIndicatorCalculator:
             'ema_long': ema_long,
             'aligned': aligned,
             'signal': self._get_ema_signal(
-                current_price, ema_short, ema_medium
+                current_price, ema_short, ema_medium, ema_long
             )
         }
     
     def _get_ema_signal(self, price: float, 
-                       ema_short: float, ema_medium: float) -> str:
+                       ema_short: float, ema_medium: float, ema_long: float) -> str:
         """EMA konumlarına göre sinyal belirler."""
-        # Daha esnek: sadece fiyatın EMA'lara göre konumu
-        if price > ema_short and ema_short > ema_medium:
-            return 'LONG'
-        elif price < ema_short and ema_short < ema_medium:
-            return 'SHORT'
-        elif price > ema_medium:
-            return 'LONG'  # Fiyat medium EMA üstünde = bullish eğilim
-        elif price < ema_medium:
-            return 'SHORT'  # Fiyat medium EMA altında = bearish eğilim
-        else:
-            return 'NEUTRAL'
+        # Trend takibi için ana filtre: EMA 200 (Long)
+        if price > ema_long:
+            # Bullish bölge
+            if ema_short > ema_medium:
+                return 'LONG' # Golden Cross / Trend
+            elif price < ema_short:
+                return 'NEUTRAL' # Pullback ihtimali
+            return 'LONG' # Genel bullish
+            
+        elif price < ema_long:
+            # Bearish bölge
+            if ema_short < ema_medium:
+                return 'SHORT' # Death Cross / Trend
+            elif price > ema_short:
+                return 'NEUTRAL' # Relief Rally ihtimali
+            return 'SHORT' # Genel bearish
+            
+        return 'NEUTRAL'
     
     def calculate_bollinger_bands(self, df: pd.DataFrame, period: int = None) -> Dict:
         """Bollinger Bands hesaplar ve sinyal üretir."""
@@ -285,7 +300,7 @@ class TechnicalIndicatorCalculator:
             'plus_di': plus_di,
             'minus_di': minus_di,
             'strength': self._get_adx_strength(adx_value),
-            'signal': self._get_adx_signal(plus_di, minus_di)
+            'signal': self._get_adx_signal(plus_di, minus_di, df['close'].iloc[-1], df)
         }
     
     def _get_adx_strength(self, adx: float) -> str:
@@ -297,12 +312,42 @@ class TechnicalIndicatorCalculator:
         else:
             return 'STRONG'
     
-    def _get_adx_signal(self, plus_di: float, minus_di: float) -> str:
-        """DI değerlerine göre sinyal belirler."""
+    def _get_adx_signal(self, plus_di: float, minus_di: float, current_price: float, df: pd.DataFrame) -> str:
+        """
+        DI değerlerine ve EMA konumuna göre sinyal belirler.
+        
+        Eğer trend çok güçlüyse (ADX yüksek), kısa vadeli DI tersleşmeleri
+        trend dönüşü değil, düzeltme (pullback) olabilir.
+        Bu yüzden EMA 200 kontrolü ekliyoruz.
+        """
+        di_signal = 'NEUTRAL'
         if plus_di > minus_di:
-            return 'LONG'
+            di_signal = 'LONG'
         elif plus_di < minus_di:
-            return 'SHORT'
-        else:
-            return 'NEUTRAL'
+            di_signal = 'SHORT'
+            
+        # EMA 200 kontrolü (Trend filtresi)
+        try:
+            ema_200 = EMAIndicator(close=df['close'], window=200).ema_indicator().iloc[-1]
+            
+            # Eğer fiyat EMA 200'ün üzerindeyse, ana trend BULLISH'tir.
+            # Bu durumda kısa vadeli -DI > +DI (SHORT) sinyali aslında bir Pullback olabilir.
+            if current_price > ema_200:
+                if di_signal == 'SHORT':
+                    # Ana trend yukarı ama DI aşağı diyor -> Nötr kal (Pullback)
+                    # Kesin SHORT deme, çünkü boğa trendindeyiz
+                    return 'NEUTRAL'
+                return 'LONG' # Hem DI hem EMA Long -> Güçlü LONG
+                
+            # Eğer fiyat EMA 200'ün altındaysa, ana trend BEARISH'tir.
+            elif current_price < ema_200:
+                if di_signal == 'LONG':
+                    # Ana trend aşağı ama DI yukarı diyor -> Nötr kal (Relief Rally)
+                    return 'NEUTRAL'
+                return 'SHORT' # Hem DI hem EMA Short -> Güçlü SHORT
+                
+        except Exception:
+            pass
+            
+        return di_signal
 

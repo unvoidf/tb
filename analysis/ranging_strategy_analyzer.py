@@ -4,7 +4,7 @@ RangingStrategyAnalyzer: Bollinger Bands + RSI tabanlı mean-reversion strateji 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Union, Tuple
 
 import pandas as pd
 
@@ -68,24 +68,31 @@ class RangingStrategyAnalyzer:
         )
 
     def generate_signal(
-        self, df: pd.DataFrame, indicators: Dict[str, Dict]
-    ) -> Optional[Dict]:
+        self, df: pd.DataFrame, indicators: Dict[str, Dict], return_reason: bool = False
+    ) -> Union[Optional[Dict], Tuple[Optional[Dict], str]]:
         """
         Ranging stratejisine göre sinyal üretir.
 
         Args:
             df: OHLCV DataFrame
             indicators: Teknik gösterge sonuçları (bollinger, rsi vb.)
+            return_reason: True ise (signal, reason) tuple döndürür
 
         Returns:
             Sinyal dict (direction, confidence, score_breakdown, custom targets)
+            veya (signal, reason) tuple
         """
+        def _ret(sig, reason=None):
+            if return_reason:
+                return sig, (reason or "NO_SIGNAL")
+            return sig
+
         if df is None or len(df) < 30:
             self.logger.debug(
                 "RangingStrategyAnalyzer.generate_signal -> insufficient data: %s",
                 len(df) if df is not None else 0,
             )
-            return None
+            return _ret(None, "INSUFFICIENT_DATA")
 
         bollinger = indicators.get("bollinger")
         rsi = indicators.get("rsi")
@@ -97,7 +104,7 @@ class RangingStrategyAnalyzer:
                 bool(bollinger),
                 bool(rsi),
             )
-            return None
+            return _ret(None, "MISSING_INDICATORS")
 
         close_price = df["close"].iloc[-1]
         bb_upper = bollinger.get("upper")
@@ -108,7 +115,7 @@ class RangingStrategyAnalyzer:
             self.logger.debug(
                 "RangingStrategyAnalyzer.generate_signal -> incomplete bollinger data"
             )
-            return None
+            return _ret(None, "INCOMPLETE_DATA")
 
         bb_range = bb_upper - bb_lower
         if bb_range <= 0:
@@ -116,12 +123,38 @@ class RangingStrategyAnalyzer:
                 "RangingStrategyAnalyzer.generate_signal -> invalid bollinger range: %s",
                 bb_range,
             )
-            return None
+            return _ret(None, "INVALID_DATA")
 
         # Mean reversion için fiyatın banda çok yakın olması gerekiyor
         # %10'luk bir alan kullan (önceden %20 idi, çok genişti)
         lower_threshold = bb_lower + bb_range * 0.1
         upper_threshold = bb_upper - bb_range * 0.1
+
+        # Normalized Position Kontrolü (Breakout/Breakdown Filtresi)
+        # Mean reversion için fiyatın Bollinger bantları içinde olması gerekir
+        # normalized_position: 0.0 = alt band, 1.0 = üst band
+        # > 1.0 = breakout (üst bandın üzeri), < 0.0 = breakdown (alt bandın altı)
+        normalized_position = (close_price - bb_lower) / bb_range if bb_range > 0 else 0.5
+        
+        if normalized_position > 1.0:
+            # Breakout durumu: Fiyat üst bandın üzerinde
+            # Mean reversion değil, trend devam ediyor olabilir
+            self.logger.info(
+                f"Sinyal reddedildi: Normalized Position {normalized_position:.3f} > 1.0 "
+                f"(Breakout durumu). Fiyat üst bandın {(normalized_position - 1.0) * 100:.1f}% üzerinde. "
+                f"Mean reversion için uygun değil."
+            )
+            return _ret(None, "FILTER_BREAKOUT")
+        
+        if normalized_position < 0.0:
+            # Breakdown durumu: Fiyat alt bandın altında
+            # Mean reversion değil, trend devam ediyor olabilir
+            self.logger.info(
+                f"Sinyal reddedildi: Normalized Position {normalized_position:.3f} < 0.0 "
+                f"(Breakdown durumu). Fiyat alt bandın {abs(normalized_position) * 100:.1f}% altında. "
+                f"Mean reversion için uygun değil."
+            )
+            return _ret(None, "FILTER_BREAKDOWN")
 
         bb_bias = self._detect_bollinger_bias(
             close_price, lower_threshold, upper_threshold
@@ -133,7 +166,7 @@ class RangingStrategyAnalyzer:
         )
 
         if direction == "NEUTRAL":
-            return RangingSignalResult(
+            result = RangingSignalResult(
                 direction="NEUTRAL",
                 confidence=confidence,
                 score_breakdown=self._build_score_breakdown(
@@ -141,10 +174,42 @@ class RangingStrategyAnalyzer:
                 ),
                 custom_targets={},
             ).to_dict()
+            # NEUTRAL sinyaller de bir sinyaldir, ama confidence düşük olabilir.
+            # SignalGenerator bunları kullanabilir (veto için vs).
+            return _ret(result, "NEUTRAL_DIRECTION")
 
+        # ATR değerini al (Volatilite bazlı stop için)
+        atr_data = indicators.get("atr")
+        # ATR bazen dict, bazen float gelebiliyor, kontrol et
+        atr_val = None
+        if isinstance(atr_data, dict):
+            atr_val = atr_data.get("value")
+        elif isinstance(atr_data, (int, float)):
+            atr_val = float(atr_data)
+            
         custom_targets = self._build_custom_targets(
-            direction, close_price, bb_lower, bb_middle, bb_upper
+            direction, close_price, bb_lower, bb_middle, bb_upper, atr_val
         )
+
+        # Risk/Reward Kontrolü (Endüstri Standardı: Min 1:1.5)
+        tp_price = custom_targets.get("tp1", {}).get("price")
+        sl_price = custom_targets.get("stop_loss", {}).get("price")
+        
+        if tp_price and sl_price:
+            risk = abs(close_price - sl_price)
+            reward = abs(tp_price - close_price)
+            
+            if risk > 0:
+                rr_ratio = reward / risk
+                if rr_ratio < 1.5:
+                    self.logger.info(
+                        f"Sinyal reddedildi: Yetersiz Risk/Reward Oranı ({rr_ratio:.2f} < 1.5). "
+                        f"Risk={risk:.4f}, Reward={reward:.4f}"
+                    )
+                    return _ret(None, "FILTER_R_R")
+            else:
+                self.logger.warning("Risk 0 hesaplandı, sinyal reddedildi.")
+                return _ret(None, "INVALID_RISK")
 
         score_breakdown = self._build_score_breakdown(
             bb_bias, rsi_bias, rsi_value, close_price, bb_lower, bb_upper
@@ -160,12 +225,14 @@ class RangingStrategyAnalyzer:
             bb_bias,
         )
 
-        return RangingSignalResult(
+        result = RangingSignalResult(
             direction=direction,
             confidence=confidence,
             score_breakdown=score_breakdown,
             custom_targets=custom_targets,
         ).to_dict()
+        
+        return _ret(result, "SUCCESS")
 
     def _detect_bollinger_bias(
         self, price: float, lower_threshold: float, upper_threshold: float
@@ -277,6 +344,7 @@ class RangingStrategyAnalyzer:
         bb_lower: float,
         bb_middle: float,
         bb_upper: float,
+        atr: Optional[float] = None,
     ) -> Dict[str, Dict[str, float]]:
         """Ranging stratejisi için TP/SL hedefleri oluşturur."""
         band_range = bb_upper - bb_lower
@@ -298,53 +366,46 @@ class RangingStrategyAnalyzer:
             },
         }
 
-        # Stop-loss: band dışına %5 buffer (mean reversion için yakın stop gerekli)
-        # Eğer fiyat bandı kırarsa, sinyal geçersiz demektir - bu yüzden stop yakın olmalı
-        buffer = band_range * 0.05
+        # Stop-loss hesaplama: ATR varsa onu kullan, yoksa band buffer kullan
+        # Endüstri standardı: Volatilite bazlı stop (ATR Trailing Stop mantığı)
         
-        # Minimum stop-loss mesafesi: Normal piyasa gürültüsüne karşı koruma
-        # Mean reversion için yakın ama %0.5'ten az olmamalı
-        # Bu, normal piyasa gürültüsünde yanlış stop-loss olmasını önler
-        min_stop_distance = current_price * self.min_stop_distance_ratio
-
-        if direction == "LONG":
-            # LONG için: Stop-loss bandın hemen altında olmalı
-            # Ama giriş fiyatının yanlış tarafında (üstünde) olmamalı
-            base_stop = bb_lower - buffer
-            # Minimum stop-loss mesafesini uygula (piyasa gürültüsüne karşı koruma)
-            min_stop_with_distance = current_price - min_stop_distance
-            # Stop-loss hem bandın dışında olmalı (base_stop) hem de minimum mesafe kuralını sağlamalı
-            # Minimum mesafe kuralı önceliklidir - eğer base_stop minimum mesafeyi ihlal ediyorsa,
-            # minimum mesafe kuralını uygula (daha aşağıda stop koy)
-            stop_price = min(base_stop, min_stop_with_distance)
-            stop_price = max(stop_price, 0.0)
-            
-            # Eğer base_stop minimum mesafeyi ihlal ediyorsa logla
-            if base_stop > min_stop_with_distance:
-                self.logger.warning(
-                    f"Base stop ({base_stop:.6f}) violates minimum distance rule "
-                    f"({min_stop_with_distance:.6f}). Using minimum distance stop."
-                )
+        # ATR Multiplier: Ranging piyasada gürültüden kaçmak için 1.5 - 2 ATR idealdir.
+        atr_sl_multiplier = 2.0 
+        
+        if atr:
+            if direction == "LONG":
+                stop_price = current_price - (atr * atr_sl_multiplier)
+                # Eğer Bollinger alt bandı ATR stop'tan daha aşağıdaysa, bandı kullan (daha geniş alan)
+                # Ancak mean reversion'da çok geniş stop istemeyiz. ATR genelde daha güvenlidir.
+                # Stop, girişin altında olmalı.
+                stop_price = min(stop_price, bb_lower - (band_range * 0.02)) 
+            else: # SHORT
+                stop_price = current_price + (atr * atr_sl_multiplier)
+                stop_price = max(stop_price, bb_upper + (band_range * 0.02))
+                
+            sl_label = f"ATR Stop ({atr_sl_multiplier}x)"
         else:
-            # SHORT için: Stop-loss bandın hemen üstünde olmalı
-            # Ayrıca bid tarafında kalmalı (giriş fiyatının altına düşmemeli)
-            base_stop = bb_upper + buffer
-            max_stop_with_distance = current_price + min_stop_distance
-            # Stop-loss hem bandın dışında olmalı (base_stop) hem de minimum mesafe kuralını sağlamalı
-            # Minimum mesafe kuralı önceliklidir - eğer base_stop minimum mesafeyi ihlal ediyorsa,
-            # minimum mesafe kuralını uygula (daha yukarıda stop koy)
-            stop_price = max(base_stop, max_stop_with_distance)
+            # Fallback: Bollinger Band Buffer (Eski yöntem, ama buffer artırıldı)
+            buffer = band_range * 0.10 # %5 -> %10 buffer
             
-            # Eğer base_stop minimum mesafeyi ihlal ediyorsa logla
-            if base_stop < max_stop_with_distance:
-                self.logger.warning(
-                    f"Base stop ({base_stop:.6f}) violates minimum distance rule "
-                    f"({max_stop_with_distance:.6f}). Using minimum distance stop."
-                )
+            if direction == "LONG":
+                base_stop = bb_lower - buffer
+                # Minimum mesafe kontrolü
+                min_stop_dist = current_price * 0.01 # Min %1 stop
+                stop_price = min(base_stop, current_price - min_stop_dist)
+            else:
+                base_stop = bb_upper + buffer
+                min_stop_dist = current_price * 0.01 # Min %1 stop
+                stop_price = max(base_stop, current_price + min_stop_dist)
+                
+            sl_label = "Bollinger Band Breach (+Buffer)"
+
+        # Güvenlik kontrolü: Stop fiyatı negatif olamaz
+        stop_price = max(stop_price, 0.0)
 
         targets["stop_loss"] = {
             "price": stop_price,
-            "label": "Bollinger Band Breach",
+            "label": sl_label,
             "type": "protective",
         }
 

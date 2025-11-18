@@ -291,11 +291,12 @@ class SignalTracker:
             direction: LONG/SHORT
             
         Returns:
-            TP hit durumları {1: True/False, 2: True/False, 3: True/False}
+            TP hit durumları {1: True/False, 2: True/False}
         """
         tp_hits = {}
         
-        for tp_level in [1, 2, 3]:
+        # Dengeli yaklaşım: Sadece TP1 ve TP2 kontrol edilir (TP3 kaldırıldı)
+        for tp_level in [1, 2]:
             tp_price_key = f'tp{tp_level}_price'
             tp_hit_key = f'tp{tp_level}_hit'
             
@@ -357,13 +358,12 @@ class SignalTracker:
             direction: LONG/SHORT
             
         Returns:
-            SL hit durumları {'1': True/False, '1.5': True/False, '2': True/False}
+            SL hit durumları {'2': True/False}
         """
         sl_hits = {}
         
+        # Dengeli yaklaşım: Sadece SL2 kontrol edilir (SL1 ve SL1.5 kaldırıldı)
         sl_levels = [
-            ('sl1_price', 'sl1_hit', '1'),
-            ('sl1_5_price', 'sl1_5_hit', '1.5'),
             ('sl2_price', 'sl2_hit', '2')
         ]
         

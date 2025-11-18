@@ -935,7 +935,8 @@ class MessageFormatter:
             # Yardımcılar
             direction = signal_data.get('direction', 'NEUTRAL')
             confidence = signal_data.get('confidence', 0.0)
-            confidence_pct = int(round(confidence * 100))
+            confidence_pct_raw = confidence * 100  # Float olarak tut (tam değer için)
+            confidence_pct = int(round(confidence * 100))  # Eski format için (cap kontrolünde kullanılacak)
             direction_emoji = self.DIRECTION_EMOJI.get(direction, '➡️')
             direction_text = self.DIRECTION_TR.get(direction, direction)
 
@@ -985,15 +986,72 @@ class MessageFormatter:
             current_price_time = current_price_timestamp if current_price_timestamp is not None else int(time.time())
             current_time_str = self._format_timestamp_with_seconds(current_price_time)
 
+            # R/R Oranı Hesapla (TP1'in R/R'si - Finans Uzmanı Önerisi)
+            rr_ratio_str = "N/A"
+            try:
+                # Önce custom targets'tan dene (ranging stratejisi için)
+                if is_ranging_strategy:
+                    tp1_price = custom_targets.get('tp1', {}).get('price')
+                    sl_price = custom_targets.get('stop_loss', {}).get('price')
+                    if tp1_price and sl_price:
+                        risk = abs(signal_price - sl_price)
+                        reward = abs(tp1_price - signal_price)
+                        if risk > 0:
+                            rr_val = reward / risk
+                            rr_ratio_str = f"{rr_val:.2f}"
+                else:
+                    # Trend stratejisi için TP1'in R/R'sini hesapla (sinyal fiyatı bazlı)
+                    # TP1 ve SL seviyelerini kullan (gerçek R:R)
+                    atr = entry_levels.get('atr')
+                    if atr:
+                        # TP1 = 3x ATR (1.5R), SL = 2x ATR (TP1'in R/R = 1.5R)
+                        if direction == 'LONG':
+                            tp1_price = signal_price + (atr * 3)
+                            sl_price = signal_price - (atr * 2)
+                        else:  # SHORT
+                            tp1_price = signal_price - (atr * 3)
+                            sl_price = signal_price + (atr * 2)
+                        
+                        risk = abs(signal_price - sl_price)
+                        reward = abs(tp1_price - signal_price)
+                        if risk > 0:
+                            rr_val = reward / risk
+                            rr_ratio_str = f"{rr_val:.2f}"
+                    else:
+                        # Fallback: Optimal entry'den al (eski yöntem)
+                        optimal_entry = entry_levels.get('optimal', {})
+                        if optimal_entry and 'risk_reward' in optimal_entry:
+                            rr_val = optimal_entry['risk_reward']
+                            rr_ratio_str = f"{rr_val:.2f}"
+            except Exception:
+                pass
+
             # Başlık - Kısa ve öz
             direction_color = '🔴' if direction == 'SHORT' else '🟢'
             header_line = f"{direction_color} {direction_title} | {symbol}"
             lines = [header_line]
+            
+            # Sinyal tarih/saat bilgisi
+            signal_created_at = created_at if created_at else int(time.time())
+            signal_datetime = self._format_timestamp(signal_created_at)
+            lines.append(f"🕐 {signal_datetime}")
             lines.append("")
             
-            # Giriş ve Güncel Fiyat
-            lines.append(f"*Giriş:* {fmt_price(signal_price)} (Sinyal)")
-            lines.append(f"*Güncel:* {fmt_price(now_price)}")
+            # Sinyal ve Güncel Fiyat
+            lines.append(f"🔔 *Sinyal:* {fmt_price(signal_price)}")
+            
+            # Güncel fiyatı sadece güncelleme mesajlarında veya ciddi fark varsa göster
+            # İlk mesajda (elapsed < 2 dk ve hit yok) gizle
+            elapsed_seconds = current_price_time - signal_created_at
+            
+            has_hits = bool(tp_hits or sl_hits or (sl_hit_times and any(sl_hit_times.values())) or (tp_hit_times and any(tp_hit_times.values())))
+            is_initial_message = elapsed_seconds < 120 and not has_hits
+            
+            if not is_initial_message:
+                lines.append(f"💵 *Güncel:* {fmt_price(now_price)}")
+            
+            # R/R Bilgisi kaldırıldı (kullanıcı talebi)
+            # lines.append(f"*R/R:* `{rr_ratio_str}`")
             
             # PNL (Kar/Zarar) - Direction'a göre doğru gösterim
             pnl_emoji = '✅' if pnl_pct > 0 else '❌' if pnl_pct < 0 else '🔁'
@@ -1008,12 +1066,13 @@ class MessageFormatter:
             except Exception:
                 pnl_amount = 0.0
             
-            lines.append(f"*Durum:* {pnl_emoji} *{pnl_pct:+.2f}%* ({pnl_status})")
+            # Durum: "Durum:" yazısı kaldırıldı, sadece emoji ve yüzde gösteriliyor
+            lines.append(f"{pnl_emoji} *{pnl_pct:+.2f}%* ({pnl_status})")
             if abs(pnl_amount) > 0.01:
                 lines.append(f"*PNL:* {fmt_money_2(pnl_amount)}")
             
             # Geçen süre
-            signal_created_at = created_at if created_at else int(time.time())
+            # signal_created_at ve current_price_time zaten yukarıda hesaplandı
             elapsed_time_str = self._format_time_elapsed(signal_created_at, current_price_time)
             if elapsed_time_str != "-":
                 # Italic için _ kullan (MarkdownV2'de * bold, _ italic)
@@ -1024,9 +1083,12 @@ class MessageFormatter:
             atr = entry_levels.get('atr')
             timeframe = entry_levels.get('timeframe') or ''
 
-            # TP seviyeleri (R:R 1:1, 1:2, 1:3) - ÖNCE
-            lines.append("🎯 *HEDEFLER*")
+            # TP seviyeleri (başlık kaldırıldı, direkt TP1/TP2 gösteriliyor)
             if is_ranging_strategy:
+                # Ranging için SL fiyatını al (R/R hesaplaması için)
+                stop_info = custom_targets.get('stop_loss', {})
+                sl_price_ranging = stop_info.get('price')
+                
                 for idx, key in enumerate(['tp1', 'tp2', 'tp3'], start=1):
                     target_info = custom_targets.get(key)
                     if not target_info:
@@ -1041,19 +1103,46 @@ class MessageFormatter:
                             tp_pct = ((signal_price - price) / signal_price) * 100 if signal_price else 0.0
                     except Exception:
                         tp_pct = 0.0
+                    
+                    # R/R oranı hesapla
+                    rr_ratio = 0.0
+                    if sl_price_ranging:
+                        try:
+                            if direction == 'LONG':
+                                risk = abs(signal_price - sl_price_ranging)
+                                reward = abs(price - signal_price)
+                            else:  # SHORT
+                                risk = abs(signal_price - sl_price_ranging)
+                                reward = abs(signal_price - price)
+                            if risk > 0:
+                                rr_ratio = reward / risk
+                        except Exception:
+                            pass
+                    
                     hit_status = bool(tp_hits and tp_hits.get(idx, False))
                     hit_emoji = "✅" if hit_status else "⏳"
                     label = target_info.get('label', f"TP{idx}")
-                    lines.append(f"{idx}️⃣ {fmt_price(price)} ({tp_pct:+.2f}%) {hit_emoji}")
+                    # R/R oranını parantez içinde ekle, format: 🎯 TP1 $PRICE (+X%) (YR) ⏳
+                    if rr_ratio > 0:
+                        lines.append(f"🎯 TP{idx} {fmt_price(price)} ({tp_pct:+.2f}%) ({rr_ratio:.2f}R) {hit_emoji}")
+                    else:
+                        lines.append(f"🎯 TP{idx} {fmt_price(price)} ({tp_pct:+.2f}%) {hit_emoji}")
             else:
                 # Risk mesafesi: ATR 1.0 (veya %1 fallback)
+                # TP seviyeleri (Dengeli Yaklaşım: TP1=1.5R, TP2=2.5R)
+                # TP1 = 3x ATR (1.5R), TP2 = 5x ATR (2.5R)
                 if atr:
                     risk_dist = atr
                 else:
                     risk_dist = signal_price * 0.01
                 tps = []
-                for rr in [1, 2, 3]:
-                    offset = risk_dist * rr
+                # TP multipliers: [3, 5] -> TP1=1.5R, TP2=2.5R (SL=2x ATR bazlı)
+                # SL mesafesi (R/R hesaplaması için)
+                sl_distance = risk_dist * 2.0  # SL = 2x ATR
+                
+                tp_multipliers = [3, 5]
+                for idx, multiplier in enumerate(tp_multipliers, start=1):
+                    offset = risk_dist * multiplier
                     if direction == 'LONG':
                         tp_price = signal_price + offset
                     elif direction == 'SHORT':
@@ -1065,36 +1154,32 @@ class MessageFormatter:
                             tp_pct = ((tp_price - signal_price) / signal_price) * 100 if signal_price else 0.0
                         except Exception:
                             tp_pct = 0.0
-                        # Hit durumunu kontrol et
-                        hit_status = bool(tp_hits and tp_hits.get(rr, False))
+                        
+                        # R/R oranı hesapla (TP mesafesi / SL mesafesi)
+                        rr_ratio = 0.0
+                        try:
+                            tp_distance = abs(offset)
+                            if sl_distance > 0:
+                                rr_ratio = tp_distance / sl_distance
+                        except Exception:
+                            pass
+                        
+                        # Hit durumunu kontrol et (tp_hits keyleri 1, 2 olarak gelir)
+                        hit_status = bool(tp_hits and tp_hits.get(idx, False))
                         hit_emoji = "✅" if hit_status else "⏳"
-                        tps.append(f"🎯 {fmt_price(tp_price)} ({tp_pct:+.2f}%) (RR {float(rr):.1f}) {hit_emoji}")
+                        # TP formatı: 🎯 TP1 $PRICE (+X%) (YR) ⏳
+                        if rr_ratio > 0:
+                            tps.append(f"🎯 TP{idx} {fmt_price(tp_price)} ({tp_pct:+.2f}%) ({rr_ratio:.2f}R) {hit_emoji}")
+                        else:
+                            tps.append(f"🎯 TP{idx} {fmt_price(tp_price)} ({tp_pct:+.2f}%) {hit_emoji}")
                 lines.extend(tps)
             lines.append("")
-            # SL seviyeleri
-            lines.append("🛡 *STOP LOSS*")
+            # SL seviyeleri (başlık kaldırıldı, direkt SL gösteriliyor)
+            
+            # SL seviyelerini sadeleştir: Tek bir SL listesi göster
             sl_levels = []
-            multipliers = [1.0, 1.5, 2.0]
-            sl_keys_order = ['1', '1.5', '2']
-            sl_hit_status = {key: False for key in sl_keys_order}
-            
-            def _normalize_sl_key(raw_key: str) -> Optional[str]:
-                try:
-                    value = float(raw_key)
-                    if abs(value - 1.0) < 1e-6:
-                        return '1'
-                    if abs(value - 1.5) < 1e-6:
-                        return '1.5'
-                    if abs(value - 2.0) < 1e-6:
-                        return '2'
-                except Exception:
-                    pass
-                if raw_key in sl_keys_order:
-                    return raw_key
-                return None
-            
+            # Ranging stratejisi için
             if is_ranging_strategy:
-                sl_levels = []
                 stop_info = custom_targets.get('stop_loss')
                 if stop_info and stop_info.get('price') is not None:
                     stop_price = stop_info.get('price')
@@ -1105,128 +1190,68 @@ class MessageFormatter:
                             sl_pct = ((signal_price - stop_price) / signal_price) * 100 if signal_price else 0.0
                     except Exception:
                         sl_pct = 0.0
-                    # Ranging stratejisinde SL sl2_price olarak kaydediliyor, bu yüzden '2' kontrol et
-                    # SL hit olduğunda ❌ (zarar demek, kötü bir şey)
-                    hit_emoji = "❌" if sl_hits and (sl_hits.get('2') or sl_hits.get('stop')) else "⏳"
-                    label = stop_info.get('label', 'Stop-Loss')
-                    # Risk yüzdesini hesapla
-                    risk_pct = abs(sl_pct)
-                    sl_levels.append(f"⛔️ {fmt_price(stop_price)} (Risk: {risk_pct:.1f}%) {hit_emoji}")
-                    if sl_hits:
-                        for key, value in sl_hits.items():
-                            normalized_key = _normalize_sl_key(str(key))
-                            if normalized_key:
-                                sl_hit_status[normalized_key] = bool(value)
-                lines.extend(sl_levels)
-                if not sl_levels:
-                    lines.append("   -")
-                extra_sl_lines = []
-            else:
-                sl_levels = []
-                if sl_hits:
-                    for key, value in sl_hits.items():
-                        normalized_key = _normalize_sl_key(str(key))
-                        if normalized_key:
-                            sl_hit_status[normalized_key] = bool(value)
-                for multiplier, key in zip(multipliers, sl_keys_order):
-                    if atr:
-                        offset = atr * multiplier
-                        if direction == 'LONG':
-                            sl_price = signal_price - offset
-                        elif direction == 'SHORT':
-                            sl_price = signal_price + offset
-                        else:
-                            sl_price = None
-                    else:
-                        pct = float(multiplier)
-                        if direction == 'LONG':
-                            sl_price = signal_price * (1 - pct/100)
-                        elif direction == 'SHORT':
-                            sl_price = signal_price * (1 + pct/100)
-                        else:
-                            sl_price = None
                     
-                    if sl_price:
-                        try:
-                            sl_pct = ((sl_price - signal_price) / signal_price) * 100 if signal_price else 0.0
-                        except Exception:
-                            sl_pct = 0.0
-                        # SL hit olduğunda ❌ (zarar demek, kötü bir şey)
-                        hit_emoji = "❌" if sl_hit_status.get(key, False) else "⏳"
-                        sl_levels.append(
-                            f"   SL {key}x ATR: {fmt_price(sl_price)} ({sl_pct:+.2f}%) {hit_emoji}"
-                        )
-                
-                lines.extend(sl_levels)
-                if not sl_levels:
-                    lines.append("   -")
-                
-                if sl_hits:
-                    for key, value in sl_hits.items():
-                        normalized_key = _normalize_sl_key(str(key))
-                        if normalized_key:
-                            sl_hit_status[normalized_key] = bool(value)
-                
-                if sl_hit_times:
-                    for key, ts in sl_hit_times.items():
-                        if ts:
-                            normalized_key = _normalize_sl_key(str(key))
-                            if normalized_key:
-                                sl_hit_status[normalized_key] = True
-                
-                highest_hit_index = -1
-                for idx, key in enumerate(sl_keys_order):
-                    if sl_hit_status.get(key):
-                        highest_hit_index = idx
-                
-                if highest_hit_index >= 0:
-                    for idx in range(highest_hit_index + 1):
-                        sl_hit_status[sl_keys_order[idx]] = True
-                
-                extra_sl_lines = []
-                for m in multipliers:
-                    if atr:
-                        offset = atr * m
-                        if direction == 'LONG':
-                            sl_price = signal_price - offset
-                        elif direction == 'SHORT':
-                            sl_price = signal_price + offset
-                        else:
-                            sl_price = None
-                        label = f"ATR {m:g} ({timeframe})"
-                        if abs(m - 1.0) < 1e-6:
-                            sl_key = '1'
-                        elif abs(m - 1.5) < 1e-6:
-                            sl_key = '1.5'
-                        else:
-                            sl_key = '2'
-                    else:
-                        pct = m if m != 1.5 else 1.5
-                        pct = float(pct)
-                        if direction == 'LONG':
-                            sl_price = signal_price * (1 - pct/100)
-                        elif direction == 'SHORT':
-                            sl_price = signal_price * (1 + pct/100)
-                        else:
-                            sl_price = None
-                        label = f"%{pct:g}"
-                        if abs(m - 1.0) < 1e-6:
-                            sl_key = '1'
-                        elif abs(m - 1.5) < 1e-6:
-                            sl_key = '1.5'
-                        else:
-                            sl_key = '2'
-                    if sl_price:
-                        try:
-                            sl_pct = ((sl_price - signal_price) / signal_price) * 100 if signal_price else 0.0
-                        except Exception:
-                            sl_pct = 0.0
-                        hit_status = sl_hit_status.get(sl_key, False)
-                        hit_emoji = "❌" if hit_status else "⏳"
-                        extra_sl_lines.append(f"🛡️ {label}: {fmt_price(sl_price)} ({sl_pct:+.2f}%) {hit_emoji}")
+                    # Hit durumunu kontrol et (Ranging'de tek SL, '2' veya 'stop' olarak gelebilir)
+                    is_hit = False
+                    if sl_hits:
+                        is_hit = sl_hits.get('2') or sl_hits.get('stop')
+                        
+                    hit_emoji = "❌" if is_hit else "⏳"
+                    label = stop_info.get('label', 'Stop-Loss')
+                    risk_pct = abs(sl_pct)
+                    sl_levels.append(f"⛔️ SL {fmt_price(stop_price)} (Risk: {risk_pct:.1f}%) {hit_emoji}")
             
-            if extra_sl_lines:
-                lines.extend(extra_sl_lines)
+            # Trend stratejisi için
+            else:
+                # Dengeli yaklaşım: Tek SL (2x ATR)
+                sl_multiplier = 2.0
+                if atr:
+                    offset = atr * sl_multiplier
+                    if direction == 'LONG':
+                        sl_price = signal_price - offset
+                    elif direction == 'SHORT':
+                        sl_price = signal_price + offset
+                    else:
+                        sl_price = None
+                else:
+                    # ATR yoksa yüzde fallback
+                    pct = float(sl_multiplier)
+                    if direction == 'LONG':
+                        sl_price = signal_price * (1 - pct/100)
+                    elif direction == 'SHORT':
+                        sl_price = signal_price * (1 + pct/100)
+                    else:
+                        sl_price = None
+                
+                if sl_price:
+                    try:
+                        if direction == 'LONG':
+                            sl_pct = ((sl_price - signal_price) / signal_price) * 100 if signal_price else 0.0
+                        else:
+                            sl_pct = ((signal_price - sl_price) / signal_price) * 100 if signal_price else 0.0
+                    except Exception:
+                        sl_pct = 0.0
+                    
+                    # Hit durumunu kontrol et (sl_hits key'i '2' olarak gelir)
+                    is_hit = False
+                    if sl_hits:
+                        # '2' veya 2.0 olarak gelebilir
+                        for k, v in sl_hits.items():
+                            try:
+                                if abs(float(k) - 2.0) < 1e-6:
+                                    if v: is_hit = True
+                            except:
+                                if str(k) == '2':
+                                    if v: is_hit = True
+                    
+                    hit_emoji = "❌" if is_hit else "⏳"
+                    risk_pct = abs(sl_pct)
+                    sl_levels.append(f"⛔️ SL {fmt_price(sl_price)} (Risk: {risk_pct:.1f}%) {hit_emoji}")
+
+            if sl_levels:
+                lines.extend(sl_levels)
+            else:
+                lines.append("   -")
 
             # TP/SL hit timeline (sadece hit'leri göster, signal log kaldırıldı)
             timeline: List[tuple[int, str]] = []
@@ -1242,7 +1267,12 @@ class MessageFormatter:
                         continue
 
             if sl_hit_times:
-                sl_labels = {'1': 'SL1', '1.5': 'SL1.5', '2': 'SL2'}
+                # Ranging stratejisinde tek SL var, onu "STOP" olarak göster
+                if is_ranging_strategy:
+                    sl_labels = {'1': 'STOP', '1.5': 'STOP', '2': 'STOP', 'stop': 'STOP'}
+                else:
+                    sl_labels = {'1': 'SL1', '1.5': 'SL1.5', '2': 'SL2'}
+                
                 for key, ts in sl_hit_times.items():
                     if not ts:
                         continue
@@ -1262,15 +1292,31 @@ class MessageFormatter:
                 for ts, desc in timeline:
                     lines.append(f"{self._format_timestamp_with_seconds(ts)} - {desc}")
 
-            # Teknik detaylar (footer)
+            # Teknik detaylar (footer) - başlık kaldırıldı
             lines.append("")
-            lines.append("📊 *Teknik Detay*")
             strategy_name = "Mean Reversion" if is_ranging_strategy else "Trend Following"
+            
+            # Confidence Cap: Maksimum %99 göster
+            confidence_pct_capped = min(confidence_pct_raw, 99.0)
+            
+            # Güven değerini tam değerle göster (1 ondalık basamak - Finans Uzmanı Önerisi)
+            confidence_display = f"{confidence_pct_capped:.1f}%"
+            
             # Code block içine aldığımız değişkenleri escape ETMEYELİM
             # Code block içinde backslash literal olarak görünüyor, çirkin duruyor
-            lines.append(f"strateji: `{strategy_name}`")
-            lines.append(f"güven: `{confidence_pct}%`")
+            lines.append(f"📈 Strateji: `{strategy_name}`")
+            lines.append(f"⚡ Güven: `{confidence_display}`")
+            
+            # 4H Teyit: Sadece ana yönle ÇELİŞİYORSA veya N/A değilse göster.
+            # Eğer ana yön LONG ve 4H de Yükseliş (LONG) ise gösterme (redundant).
+            show_forecast = False
             if forecast_text != 'N/A':
+                direction_forecast = self.DIRECTION_FORECAST.get(direction)
+                # Eğer tahmin ana yönle aynıysa gösterme
+                if forecast_text != direction_forecast:
+                    show_forecast = True
+            
+            if show_forecast:
                 # Code block içine aldığımız için escape etmiyoruz
                 # Alt çizgi hatası: 4h_teyit -> 4H Teyit (boşluklu)
                 lines.append(f"4H Teyit: `{forecast_text}`")

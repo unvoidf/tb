@@ -139,15 +139,15 @@ class CoinFilter:
         )
         return sorted_pairs[:count]
     
-    def get_top_futures_coins(self, count: int = 20) -> List[str]:
+    def get_top_futures_coins(self, count: int = 50) -> List[str]:
         """
-        Smart Liquidity + Stability Score ile top N coin çeker.
+        Hibrit Dinamik Tarama (Majors + Momentum) ile coin seçer.
         
         Args:
-            count: Döndürülecek coin sayısı
+            count: Toplam döndürülecek coin sayısı (Default: 50)
             
         Returns:
-            Futures coin sembol listesi
+            Futures coin sembol listesi (Majors + Momentum)
         """
         try:
             # Futures exchange instance oluştur
@@ -162,21 +162,81 @@ class CoinFilter:
             )
             self.logger.debug(f"futures_tickers_count={len(tickers)}")
             
-            # Smart coin selection uygula
-            smart_coins = self._get_smart_coins(tickers, count)
-            
+            # 1. Majors (Demirbaşlar) - Limit: 15
+            # Smart Liquidity + Stability Score ile en güvenilir coinler
+            major_count = 15
+            major_coins = self._get_smart_coins(tickers, major_count)
             self.logger.info(
-                f"Smart selection ile top {count} futures coin seçildi: {', '.join(smart_coins)}"
+                f"🏰 Majors ({len(major_coins)}): {', '.join(major_coins)}"
             )
             
-            return smart_coins
+            # 2. Momentum (Radar) - Limit: Kalan (örn: 35)
+            # Fiyat değişimi (Volatility) ve Hacim ile "Hareketli" coinler
+            momentum_count = max(0, count - len(major_coins))
+            momentum_coins = self._get_momentum_coins(tickers, momentum_count, exclude=major_coins)
+            self.logger.info(
+                f"📡 Radar ({len(momentum_coins)}): {', '.join(momentum_coins)}"
+            )
+            
+            # İki listeyi birleştir
+            combined_coins = list(set(major_coins + momentum_coins))
+            
+            self.logger.info(
+                f"Hibrit Tarama Toplam {len(combined_coins)} coin: {', '.join(combined_coins)}"
+            )
+            
+            return combined_coins
             
         except Exception as e:
             self.logger.error(
-                f"Smart coin filtreleme hatası: {str(e)}",
+                f"Hibrit coin filtreleme hatası: {str(e)}",
                 exc_info=True
             )
             return self._get_futures_fallback_coins(count)
+
+    def _get_momentum_coins(self, tickers: Dict, count: int, exclude: List[str] = []) -> List[str]:
+        """
+        Momentum (Radar) Filtresi: Fiyat değişimi yüksek olan hareketli coinleri seçer.
+        
+        Args:
+            tickers: Ticker bilgileri
+            count: İstene coin sayısı
+            exclude: Hariç tutulacak coinler (Majors listesi)
+            
+        Returns:
+            Momentum coin sembol listesi
+        """
+        momentum_candidates = []
+        
+        for symbol, ticker in tickers.items():
+            # Futures sembol formatını normalize et
+            normalized_symbol = symbol.replace(':USDT', '').replace(':USDC', '')
+            
+            # Zaten Majors listesindeyse atla
+            if normalized_symbol in exclude:
+                continue
+                
+            # Temel filtreler (Leverage token, stablecoin, dead coin vb.)
+            if not self._passes_quick_filters(normalized_symbol, ticker):
+                continue
+            
+            # Momentum Kriteri: Fiyat Değişimi (Mutlak Değer)
+            # Hem çok düşenleri (Oversold fırsatı) hem çok çıkanları (Trend fırsatı) yakalar
+            price_change_percent = abs(float(ticker.get('percentage', 0) or 0))
+            
+            # Ek Kriter: Yeterli Hacim (Pump/Dump tuzağı olmaması için)
+            # Majors kadar yüksek olmasına gerek yok ama en az 5M USDT olsun
+            quote_volume = float(ticker.get('quoteVolume', 0) or 0)
+            if quote_volume < 5000000: # 5M USDT
+                continue
+                
+            momentum_candidates.append((normalized_symbol, price_change_percent))
+            
+        # Fiyat değişimine göre sırala (En çok hareket eden en üstte)
+        momentum_candidates.sort(key=lambda x: x[1], reverse=True)
+        
+        selected = [symbol for symbol, pct in momentum_candidates[:count]]
+        return selected
     
     def _filter_futures_usdt_pairs(self, tickers: Dict) -> List[Dict]:
         """
