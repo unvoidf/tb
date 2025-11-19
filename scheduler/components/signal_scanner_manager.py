@@ -4,16 +4,18 @@ Top 5 futures coin'i tarar, güçlü sinyalleri yakalar ve cooldown mekanizması
 """
 import time
 import json
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union, Tuple
 from utils.logger import LoggerManager
 from data.coin_filter import CoinFilter
-from bot.command_handler import CommandHandler
+
 from strategy.dynamic_entry_calculator import DynamicEntryCalculator
 from bot.message_formatter import MessageFormatter
 from bot.telegram_bot_manager import TelegramBotManager
 from scheduler.components.signal_ranker import SignalRanker
 from data.signal_repository import SignalRepository
 from strategy.risk_reward_calculator import RiskRewardCalculator
+from analysis.signal_generator import SignalGenerator
+from data.market_data_manager import MarketDataManager
 
 
 class SignalScannerManager:
@@ -22,7 +24,8 @@ class SignalScannerManager:
     def __init__(
         self,
         coin_filter: CoinFilter,
-        command_handler: CommandHandler,
+        market_data: MarketDataManager,
+        signal_generator: SignalGenerator,
         entry_calculator: DynamicEntryCalculator,
         message_formatter: MessageFormatter,
         bot_manager: TelegramBotManager,
@@ -38,8 +41,10 @@ class SignalScannerManager:
         SignalScannerManager'ı başlatır.
         
         Args:
+        Args:
             coin_filter: Coin filter instance
-            command_handler: Command handler instance
+            market_data: Market data manager
+            signal_generator: Signal generator
             entry_calculator: Dynamic entry calculator
             message_formatter: Message formatter
             bot_manager: Telegram bot manager
@@ -52,7 +57,9 @@ class SignalScannerManager:
             cooldown_hours: Cooldown süresi (saat)
         """
         self.coin_filter = coin_filter
-        self.cmd_handler = command_handler
+        self.coin_filter = coin_filter
+        self.market_data = market_data
+        self.signal_gen = signal_generator
         self.entry_calc = entry_calculator
         self.formatter = message_formatter
         self.bot_mgr = bot_manager
@@ -137,7 +144,7 @@ class SignalScannerManager:
         """
         try:
             # Coin için sinyal analizi yap (return_reason=True ile)
-            signal_data, reason = self.cmd_handler._analyze_symbol(symbol, return_reason=True)
+            signal_data, reason = self._analyze_symbol(symbol, return_reason=True)
             
             if not signal_data:
                 self.logger.debug(f"{symbol} için sinyal verisi yok (Reason: {reason})")
@@ -359,7 +366,7 @@ class SignalScannerManager:
                 signal_data = self._temp_signal_data.get(symbol, {})
                 score_breakdown = signal_data.get('score_breakdown', {})
                 market_context = signal_data.get('market_context', {})
-                current_price = self.cmd_handler.market_data.get_latest_price(symbol)
+                current_price = self.market_data.get_latest_price(symbol)
                 self.signal_repository.save_rejected_signal(
                     symbol=symbol,
                     direction=direction,
@@ -391,7 +398,7 @@ class SignalScannerManager:
             signal_data = self._temp_signal_data.get(symbol, {})
             score_breakdown = signal_data.get('score_breakdown', {})
             market_context = signal_data.get('market_context', {})
-            current_price = self.cmd_handler.market_data.get_latest_price(symbol)
+            current_price = self.market_data.get_latest_price(symbol)
             self.signal_repository.save_rejected_signal(
                 symbol=symbol,
                 direction=direction,
@@ -438,7 +445,7 @@ class SignalScannerManager:
                 return
             
             # Yeni sinyal fiyatını al
-            current_price = self.cmd_handler.market_data.get_latest_price(symbol)
+            current_price = self.market_data.get_latest_price(symbol)
             if not current_price:
                 self.logger.debug(f"{symbol} güncel fiyat alınamadı, log eklenemedi")
                 return
@@ -522,7 +529,7 @@ class SignalScannerManager:
         """
         try:
             # Sinyal üretim anındaki fiyat (signal_price)
-            current_price = self.cmd_handler.market_data.get_latest_price(symbol)
+            current_price = self.market_data.get_latest_price(symbol)
             signal_price = current_price
             signal_created_at = int(time.time())
             
@@ -540,7 +547,7 @@ class SignalScannerManager:
             
             try:
                 # 1h timeframe'den veri al
-                df = self.cmd_handler.market_data.fetch_ohlcv(symbol, '1h', 200)
+                df = self.market_data.fetch_ohlcv(symbol, '1h', 200)
                 
                 # ATR hesapla (doğru sınıf adı: TechnicalIndicatorCalculator)
                 if df is not None and len(df) > 14:
@@ -561,7 +568,7 @@ class SignalScannerManager:
             )
             
             # Gönderim anındaki anlık fiyatı yeniden al (küçük farkları göstermek için)
-            now_price = self.cmd_handler.market_data.get_latest_price(symbol)
+            now_price = self.market_data.get_latest_price(symbol)
             if not now_price:
                 now_price = signal_price
             current_price_timestamp = int(time.time())
@@ -798,6 +805,51 @@ class SignalScannerManager:
         self,
         custom_targets: Dict[str, Dict[str, float]]
     ) -> Dict:
+        """Custom TP/SL seviyelerini oluşturur."""
+        tp_levels = {}
+        sl_levels = {}
+        
+        if 'tp' in custom_targets:
+            for k, v in custom_targets['tp'].items():
+                tp_levels[k] = v
+                
+        if 'sl' in custom_targets:
+            for k, v in custom_targets['sl'].items():
+                sl_levels[k] = v
+                
+        return {**tp_levels, **sl_levels}
+
+    def _analyze_symbol(self, symbol: str, return_reason: bool = False) -> Union[Optional[Dict], Tuple[Optional[Dict], str]]:
+        """
+        Tek sembol için multi-timeframe analiz yapar.
+        
+        Args:
+            symbol: Trading pair
+            return_reason: True ise (signal, reason) tuple döndürür
+            
+        Returns:
+            Sinyal bilgisi veya None (veya tuple)
+        """
+        # Timeframes config'den alınmalı ama burada hardcoded veya config'den geçilmeli
+        # Şimdilik standart timeframes kullanıyoruz
+        timeframes = ['1h', '4h', '1d']
+        
+        # Multi-timeframe veri çek
+        multi_tf_data = self.market_data.fetch_multi_timeframe(
+            symbol, timeframes
+        )
+        
+        if not multi_tf_data:
+            if return_reason:
+                return None, "NO_DATA"
+            return None
+        
+        # Sinyal üret (symbol parametresi eklendi)
+        signal = self.signal_gen.generate_signal(
+            multi_tf_data, symbol=symbol, return_reason=return_reason
+        )
+        
+        return signal
         """Custom hedeflerden TP/SL seviyeleri oluşturur."""
         def _price_for(key: str) -> Optional[float]:
             info = custom_targets.get(key, {})

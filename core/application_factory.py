@@ -20,7 +20,7 @@ from strategy.risk_manager import RiskManager
 from strategy.risk_reward_calculator import RiskRewardCalculator
 from bot.user_whitelist import UserWhitelist
 from bot.message_formatter import MessageFormatter
-from bot.command_handler import CommandHandler
+from bot.message_formatter import MessageFormatter
 from bot.telegram_bot_manager import TelegramBotManager
 from scheduler.analysis_scheduler import AnalysisScheduler
 from strategy.dynamic_entry_calculator import DynamicEntryCalculator
@@ -84,14 +84,10 @@ class ApplicationFactory:
         user_whitelist = self._create_user_whitelist(config)
         message_formatter = self._create_message_formatter()
         
-        command_handler = self._create_command_handler(
-            market_data, coin_filter, signal_generator, 
-            position_calc, risk_manager, 
-            user_whitelist, message_formatter, config
-        )
+        # Command Handler removed
         
         # Telegram bot'u önce oluştur (reminder_manager olmadan)
-        telegram_bot = self._create_telegram_bot(config, command_handler)
+        telegram_bot = self._create_telegram_bot(config)
         
         # Lifecycle bildirimlerini configure et (kanal + cache)
         try:
@@ -118,7 +114,7 @@ class ApplicationFactory:
         
         # Signal Scanner System (SignalTracker'ı inject et)
         signal_scanner_manager = self._create_signal_scanner_manager(
-            coin_filter, command_handler, dynamic_entry_calc, 
+            coin_filter, market_data, signal_generator, dynamic_entry_calc, 
             message_formatter, telegram_bot, signal_repository, config,
             risk_reward_calc, signal_tracker=signal_tracker
         )
@@ -126,7 +122,7 @@ class ApplicationFactory:
         
         # Scheduler
         scheduler = self._create_analysis_scheduler(
-            telegram_bot, command_handler, message_formatter, 
+            telegram_bot, signal_generator, message_formatter, 
             coin_filter, market_data, config
         )
         
@@ -146,7 +142,8 @@ class ApplicationFactory:
             'dynamic_entry_calc': dynamic_entry_calc,
             'user_whitelist': user_whitelist,
             'message_formatter': message_formatter,
-            'command_handler': command_handler,
+            'user_whitelist': user_whitelist,
+            'message_formatter': message_formatter,
             'telegram_bot': telegram_bot,
             'scheduler': scheduler,
             'signal_scanner_manager': signal_scanner_manager,
@@ -278,40 +275,18 @@ class ApplicationFactory:
         """Message formatter oluşturur."""
         return MessageFormatter()
     
-    def _create_command_handler(self, market_data: MarketDataManager,
-                               coin_filter: CoinFilter,
-                               signal_generator: SignalGenerator,
-                               position_calc: PositionCalculator,
-                               risk_manager: RiskManager,
-                               user_whitelist: UserWhitelist,
-                               message_formatter: MessageFormatter,
-                               config: ConfigManager) -> CommandHandler:
-        """Command handler oluşturur."""
-        return CommandHandler(
-            whitelist=user_whitelist,
-            formatter=message_formatter,
-            market_data=market_data,
-            coin_filter=coin_filter,
-            signal_generator=signal_generator,
-            position_calc=position_calc,
-            risk_manager=risk_manager,
-            timeframes=config.timeframes,
-            top_count=config.top_coins_count,
-            top_signals=config.top_signals_count
-        )
+    # Command Handler creator removed
     
     def _create_telegram_bot(self, config: ConfigManager, 
-                           command_handler: CommandHandler, 
                            reminder_manager=None) -> TelegramBotManager:
         """Telegram bot oluşturur."""
         return TelegramBotManager(
             token=config.telegram_token,
-            command_handler=command_handler,
             reminder_manager=reminder_manager
         )
     
     def _create_analysis_scheduler(self, telegram_bot: TelegramBotManager,
-                                 command_handler: CommandHandler,
+                                 signal_generator: SignalGenerator,
                                  message_formatter: MessageFormatter,
                                  coin_filter: CoinFilter,
                                  market_data: MarketDataManager,
@@ -319,7 +294,7 @@ class ApplicationFactory:
         """Analysis scheduler oluşturur."""
         return AnalysisScheduler(
             bot_manager=telegram_bot,
-            command_handler=command_handler,
+            signal_generator=signal_generator,
             formatter=message_formatter,
             coin_filter=coin_filter,
             market_data=market_data,
@@ -342,7 +317,8 @@ class ApplicationFactory:
         return SignalRepository(database)
     
     def _create_signal_scanner_manager(self, coin_filter: CoinFilter,
-                                     command_handler: CommandHandler,
+                                     market_data: MarketDataManager,
+                                     signal_generator: SignalGenerator,
                                      entry_calculator: DynamicEntryCalculator,
                                      message_formatter: MessageFormatter,
                                      bot_manager: TelegramBotManager,
@@ -353,7 +329,8 @@ class ApplicationFactory:
         """Signal scanner manager oluşturur."""
         return SignalScannerManager(
             coin_filter=coin_filter,
-            command_handler=command_handler,
+            market_data=market_data,
+            signal_generator=signal_generator,
             entry_calculator=entry_calculator,
             message_formatter=message_formatter,
             bot_manager=bot_manager,

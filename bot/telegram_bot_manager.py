@@ -9,38 +9,29 @@ from telegram import Update
 from telegram.error import TimedOut, RetryAfter
 from telegram.ext import Application, ContextTypes, CallbackQueryHandler
 from utils.logger import LoggerManager
-from bot.command_handler import CommandHandler
+from utils.logger import LoggerManager
 
 
 class TelegramBotManager:
     """Telegram bot'u yönetir."""
     
-    def __init__(self, token: str, command_handler: CommandHandler, reminder_manager=None):
+    def __init__(self, token: str, reminder_manager=None):
         """
         TelegramBotManager'ı başlatır.
         
         Args:
             token: Telegram bot token
-            command_handler: Komut işleyici
             reminder_manager: Forecast reminder manager (opsiyonel)
         """
         self.token = token
-        self.cmd_handler = command_handler
         self.reminder_manager = reminder_manager
         self.logger = LoggerManager().get_logger('TelegramBot')
         self.application = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         
-        # Command handlers'ı initialize et
-        self._initialize_command_handlers()
-
         # Lifecycle notification helpers
         self._channel_id = None
         self._forecast_cache = None
-    
-    def _initialize_command_handlers(self) -> None:
-        """Command handler'larını initialize eder (yalnızca callback için placeholder)."""
-        self.logger.debug("Initializing command handlers (noop - only callback active)")
     
     async def error_handler(
         self, update: object, context: ContextTypes.DEFAULT_TYPE

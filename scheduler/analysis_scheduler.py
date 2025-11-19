@@ -7,7 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from typing import List
 from utils.logger import LoggerManager
 from bot.telegram_bot_manager import TelegramBotManager
-from bot.command_handler import CommandHandler
+from analysis.signal_generator import SignalGenerator
 from bot.message_formatter import MessageFormatter
 from data.coin_filter import CoinFilter
 from scheduler.components.hourly_analyzer import HourlyAnalyzer
@@ -20,7 +20,7 @@ class AnalysisScheduler:
     
     def __init__(self,
                  bot_manager: TelegramBotManager,
-                 command_handler: CommandHandler,
+                 signal_generator: SignalGenerator,
                  formatter: MessageFormatter,
                  coin_filter: CoinFilter,
                  market_data,
@@ -32,7 +32,7 @@ class AnalysisScheduler:
         
         Args:
             bot_manager: Telegram bot manager
-            command_handler: Komut handler
+            signal_generator: Signal generator
             formatter: Mesaj formatter
             coin_filter: Coin filter
             market_data: Market data manager
@@ -41,7 +41,7 @@ class AnalysisScheduler:
             top_signals: Raporlanacak top sinyal sayısı
         """
         self.bot_mgr = bot_manager
-        self.cmd_handler = command_handler
+        self.signal_gen = signal_generator
         self.formatter = formatter
         self.coin_filter = coin_filter
         self.market_data = market_data
@@ -56,7 +56,7 @@ class AnalysisScheduler:
     
     def _initialize_components(self) -> None:
         """Scheduler bileşenlerini initialize eder."""
-        self.hourly_analyzer = HourlyAnalyzer(self.coin_filter, self.cmd_handler)
+        self.hourly_analyzer = HourlyAnalyzer(self.coin_filter, self.market_data, self.signal_gen)
         self.signal_ranker = SignalRanker()
         self.channel_notifier = ChannelNotifier(self.bot_mgr, self.formatter, self.market_data)
     

@@ -5,22 +5,26 @@ Top coinleri analiz eder ve sinyal üretir.
 from typing import List, Dict
 from utils.logger import LoggerManager
 from data.coin_filter import CoinFilter
-from bot.command_handler import CommandHandler
+from data.coin_filter import CoinFilter
+from analysis.signal_generator import SignalGenerator
+from data.market_data_manager import MarketDataManager
 
 
 class HourlyAnalyzer:
     """Saatlik analiz yapan bileşen."""
     
-    def __init__(self, coin_filter: CoinFilter, command_handler: CommandHandler):
+    def __init__(self, coin_filter: CoinFilter, market_data: MarketDataManager, signal_generator: SignalGenerator):
         """
         HourlyAnalyzer'ı başlatır.
         
         Args:
             coin_filter: Coin filter
-            command_handler: Komut handler
+            market_data: Market data manager
+            signal_generator: Signal generator
         """
         self.coin_filter = coin_filter
-        self.cmd_handler = command_handler
+        self.market_data = market_data
+        self.signal_gen = signal_generator
         self.logger = LoggerManager().get_logger('HourlyAnalyzer')
     
     def analyze_top_coins(self, top_count: int = 20) -> List[Dict]:
@@ -48,7 +52,15 @@ class HourlyAnalyzer:
             
             for symbol in symbols:
                 try:
-                    signal_data = self.cmd_handler._analyze_symbol(symbol)
+                    # Multi-timeframe veri çek
+                    timeframes = ['1h', '4h', '1d']
+                    multi_tf_data = self.market_data.fetch_multi_timeframe(symbol, timeframes)
+                    
+                    if multi_tf_data:
+                        signal_data = self.signal_gen.generate_signal(multi_tf_data, symbol=symbol)
+                    else:
+                        signal_data = None
+
                     if signal_data:
                         all_signals.append({
                             'symbol': symbol,
