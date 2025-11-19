@@ -8,6 +8,7 @@ from typing import List, Dict
 from utils.logger import LoggerManager
 from utils.retry_handler import RetryHandler
 from utils.exchange_factory import ExchangeFactory
+from data.filters.coin_scorer import CoinScorer
 
 
 class CoinFilter:
@@ -23,6 +24,7 @@ class CoinFilter:
         self.exchange = ExchangeFactory.create_binance_futures()
         self.retry_handler = retry_handler
         self.logger = LoggerManager().get_logger('CoinFilter')
+        self.coin_scorer = CoinScorer()
     
     def get_top_volume_coins(self, count: int = 20) -> List[str]:
         """
@@ -362,9 +364,10 @@ class CoinFilter:
                 self.logger.debug(f"Smart selection {symbol}: insufficient data")
                 continue
             
-            # Smart scoring
-            liquidity_score = self._calculate_liquidity_score(symbol, ticker)
-            stability_score = self._calculate_stability_score(symbol, ticker)
+            # Smart scoring (CoinScorer kullanarak)
+            liquidity_score = self.coin_scorer.calculate_liquidity_score(ticker)
+            stability_score = self.coin_scorer.calculate_stability_score(ticker)
+            # Volume pattern için eski metod kullanılıyor (OHLCV gerektiriyor)
             volume_pattern_score = self._analyze_volume_pattern(symbol)
             
             # Stabilite skoru 0.0 olan coinleri filtrele
@@ -491,84 +494,6 @@ class CoinFilter:
         # Pump&dump riski volume, stability ve dead_coin kontrolleri ile filtreleniyor.
         
         return True
-    
-    def _calculate_liquidity_score(self, symbol: str, ticker: Dict) -> float:
-        """
-        Ticker quoteVolume bazlı likidite skoru (%50 ağırlık).
-        
-        NOT: OHLCV volume'u Binance futures'ta tutarsız (bazen çok düşük, bazen çok yüksek).
-        Ticker quoteVolume kullanılıyor çünkü doğru ve güncel 24 saatlik toplam volume'u gösteriyor.
-        """
-        try:
-            # Ticker'dan 24 saatlik volume (doğru ve güncel)
-            quote_volume = ticker.get('quoteVolume', 0)
-            
-            if not quote_volume or quote_volume <= 0:
-                self.logger.debug(f"Liquidity score {symbol}: no quoteVolume in ticker")
-                return 0
-            
-            # Minimum volume threshold
-            if quote_volume < 100000:  # 100K USDT minimum
-                self.logger.debug(f"Liquidity score {symbol}: low volume ({quote_volume:.0f} < 100K)")
-                return 0
-            
-            # NOT: OHLCV volume'u Binance futures'ta tutarsız olduğu için consistency kontrolü kaldırıldı.
-            # Ticker quoteVolume doğru ve güncel 24 saatlik toplam volume'u gösteriyor.
-            # Volume consistency kontrolü yapılmıyor çünkü OHLCV volume'u güvenilir değil.
-            volume_consistency = 1.0
-            
-            # Volume score (0-100)
-            # Normalizasyon: 10M USDT = 100 puan
-            # Büyük coinler (BTC, ETH) için 10M+ volume = 100 puan (max)
-            volume_score = min(quote_volume / 10000000, 100)  # 10M max = 100 puan
-            liquidity_score = volume_score * volume_consistency
-            
-            # Debug log
-            self.logger.debug(f"Liquidity calculation {symbol}: quote_volume={quote_volume:.0f}, "
-                            f"volume_score={volume_score:.2f}, liquidity_score={liquidity_score:.1f}")
-            
-            return liquidity_score
-            
-        except Exception as e:
-            self.logger.debug(f"Liquidity score hatası {symbol}: {e}")
-            return 0
-    
-    def _calculate_stability_score(self, symbol: str, ticker: Dict) -> float:
-        """Volatilite kontrolü ile stabilite skoru (%30 ağırlık)."""
-        try:
-            # Son 21 günlük veri (minimum veri kontrolü)
-            ohlcv_1d = self.exchange.fetch_ohlcv(symbol, '1d', limit=21)
-            
-            if len(ohlcv_1d) < 21:
-                self.logger.debug(f"Stability score {symbol}: insufficient data ({len(ohlcv_1d)} days < 21)")
-                return 0
-            
-            # Günlük fiyat değişimleri
-            price_changes = []
-            for i in range(1, len(ohlcv_1d)):
-                change = abs((ohlcv_1d[i][4] - ohlcv_1d[i-1][4]) / ohlcv_1d[i-1][4])
-                price_changes.append(change)
-            
-            # Volatilite hesaplama
-            avg_volatility = sum(price_changes) / len(price_changes)
-            
-            # Stabilite skoru (düşük volatilite = yüksek skor)
-            stability_score = max(0, 100 - (avg_volatility * 1000))
-            
-            # Stabilite skoru 0.0 olan coinleri filtrele
-            if stability_score == 0.0:
-                self.logger.debug(f"Stability score {symbol}: filtered due to zero stability (volatility={avg_volatility:.4f})")
-                return 0
-            
-            # Debug log
-            self.logger.debug(f"Stability calculation {symbol}: data_length={len(ohlcv_1d)}, "
-                            f"avg_volatility={avg_volatility:.4f}, stability_score={stability_score:.1f}")
-            
-            return stability_score
-            
-        except Exception as e:
-            self.logger.debug(f"Stability score hatası {symbol}: {e}")
-            return 0
     
     def _analyze_volume_pattern(self, symbol: str) -> float:
         """Volume pattern analizi (%20 ağırlık)."""

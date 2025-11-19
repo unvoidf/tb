@@ -8,6 +8,7 @@ from analysis.technical_indicators import TechnicalIndicatorCalculator
 from analysis.volume_analyzer import VolumeAnalyzer
 from analysis.adaptive_thresholds import AdaptiveThresholdManager
 from analysis.ranging_strategy_analyzer import RangingStrategyAnalyzer
+from analysis.generators.market_analyzer import MarketAnalyzer
 from utils.logger import LoggerManager
 
 
@@ -38,6 +39,11 @@ class SignalGenerator:
         self.tf_weights = timeframe_weights
         self.ranging_analyzer = ranging_analyzer
         self.market_data = market_data_manager
+        self.market_analyzer = MarketAnalyzer(
+            market_data_manager, 
+            indicator_calculator, 
+            volume_analyzer
+        )
         self.logger = LoggerManager().get_logger('SignalGenerator')
     
     def generate_signal(
@@ -65,7 +71,7 @@ class SignalGenerator:
         
         # 1. BTC Correlation Check (Bitcoin Kraldır Filtresi)
         if symbol and symbol != 'BTC/USDT':
-            market_state = self._check_global_market_condition()
+            market_state = self.market_analyzer.check_global_market_condition()
             if market_state == 'BEARISH_CRASH':
                 self.logger.warning(
                     f"{symbol} LONG sinyali reddedildi: Global piyasa (BTC) çöküşte. "
@@ -100,7 +106,7 @@ class SignalGenerator:
         
         # 2. Intraday Circuit Breaker (4h EMA kontrolü)
         if combined_signal and combined_signal.get('direction') == 'LONG':
-            circuit_breaker_active = self._check_intraday_circuit_breaker(multi_tf_data)
+            circuit_breaker_active = self.market_analyzer.check_intraday_circuit_breaker(multi_tf_data)
             if circuit_breaker_active:
                 self.logger.warning(
                     f"{symbol} LONG sinyali reddedildi: Intraday circuit breaker aktif. "
@@ -112,7 +118,7 @@ class SignalGenerator:
         # 3. Volume Climax Check (Ranging LONG için)
         if combined_signal and combined_signal.get('strategy_type') == 'ranging':
             if combined_signal.get('direction') == 'LONG':
-                volume_climax_ok = self._check_volume_climax(multi_tf_data)
+                volume_climax_ok = self.market_analyzer.check_volume_climax(multi_tf_data)
                 if not volume_climax_ok:
                     self.logger.warning(
                         f"{symbol} Ranging LONG sinyali reddedildi: Volume climax yok. "
@@ -168,7 +174,7 @@ class SignalGenerator:
             self.logger.debug(f"Technical indicators calculation failed for {data_length} candles")
             return _ret(None, "INDICATOR_ERROR")
         
-        regime = self._detect_market_regime(indicators)
+        regime = self.market_analyzer.detect_market_regime(indicators)
         
         # Hacim analizi (adaptive period ile)
         volume = self.volume_analyzer.analyze(closed_df, adaptive_params['volume_ma_period'])

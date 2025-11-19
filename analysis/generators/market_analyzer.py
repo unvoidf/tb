@@ -3,47 +3,55 @@ MarketAnalyzer: Piyasa rejimi ve koşul analizi.
 Global market condition, regime detection, circuit breaker checks.
 """
 import pandas as pd
-from typing import Dict
+from typing import Dict, Optional
 from utils.logger import LoggerManager
 
 
 class MarketAnalyzer:
     """Piyasa analiz helper sınıfı."""
     
-    def __init__(self, market_data_manager=None):
+    def __init__(self, market_data_manager=None, indicator_calculator=None, volume_analyzer=None):
         """
         MarketAnalyzer'ı başlatır.
         
         Args:
             market_data_manager: Market data manager (BTC correlation için)
+            indicator_calculator: Technical indicator calculator (opsiyonel, circuit breaker için)
+            volume_analyzer: Volume analyzer (opsiyonel, volume climax için)
         """
         self.market_data = market_data_manager
+        self.indicator_calc = indicator_calculator
+        self.volume_analyzer = volume_analyzer
         self.logger = LoggerManager().get_logger('MarketAnalyzer')
     
     def detect_market_regime(self, indicators: Dict) -> str:
         """
-        Piyasa rejimini tespit eder.
+        EMA alignment ve ADX değerine göre piyasa rejimini belirler.
         
         Args:
             indicators: Teknik göstergeler
             
         Returns:
-            Market regime: 'TRENDING', 'RANGING', 'VOLATILE'
+            Market regime: 'trending_up', 'trending_down', 'ranging'
         """
         try:
-            adx = indicators.get('adx')
-            bb_width = indicators.get('bb_width', 0)
-            atr_percent = indicators.get('atr_percent', 0)
+            ema_data = indicators.get('ema', {}) if isinstance(indicators, dict) else {}
+            adx_data = indicators.get('adx', {}) if isinstance(indicators, dict) else {}
             
-            # ADX bazlı trend tespiti
-            if adx and adx > 25:
-                return 'TRENDING'
-            elif bb_width < 0.02 or atr_percent < 1.5:  # Dar range
-                return 'RANGING'
-            else:
-                return 'VOLATILE'
+            ema_aligned = ema_data.get('aligned', False)
+            ema_signal = ema_data.get('signal', 'NEUTRAL')
+            
+            adx_value = adx_data.get('value', 0) if isinstance(adx_data, dict) else 0
+            
+            if ema_aligned and adx_value > 25:
+                if ema_signal == 'LONG':
+                    return 'trending_up'
+                if ema_signal == 'SHORT':
+                    return 'trending_down'
+            
+            return 'ranging'
         except Exception:
-            return 'UNKNOWN'
+            return 'ranging'
     
     def check_global_market_condition(self) -> str:
         """
