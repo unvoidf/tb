@@ -368,16 +368,18 @@ class SignalFormatter(BaseFormatter):
                         continue
 
             if sl_hit_times:
-                # Ranging stratejisinde tek SL var, onu "STOP" olarak göster
+                # Artık sadece SL2 kullanılıyor (SL1 ve SL1.5 kaldırıldı)
+                # Ranging stratejisinde "STOP", Trend Following'de "SL" göster
                 if is_ranging_strategy:
                     sl_labels = {'1': 'STOP', '1.5': 'STOP', '2': 'STOP', 'stop': 'STOP'}
                 else:
-                    sl_labels = {'1': 'SL1', '1.5': 'SL1.5', '2': 'SL2'}
+                    # Trend Following: Sadece SL2 kullanılıyor, "SL" olarak göster
+                    sl_labels = {'1': 'SL', '1.5': 'SL', '2': 'SL'}
                 
                 for key, ts in sl_hit_times.items():
                     if not ts:
                         continue
-                    label = sl_labels.get(str(key), f"SL{key}")
+                    label = sl_labels.get(str(key), 'SL')
                     try:
                         timeline.append((int(ts), f"{label}🛡️"))
                     except Exception:
