@@ -236,9 +236,16 @@ class TelegramBotManager:
             if reply_markup is not None:
                 kwargs['reply_markup'] = reply_markup
                 
-            await self.application.bot.edit_message_text(**kwargs)
-            self.logger.info(f"Kanal mesajı güncellendi - Message ID: {message_id}")
-            return (True, False)
+            try:
+                await self.application.bot.edit_message_text(**kwargs)
+                self.logger.info(f"Kanal mesajı güncellendi - Message ID: {message_id}")
+                return (True, False)
+            except Exception as e:
+                # "Message is not modified" hatası normaldir (içerik değişmediyse)
+                if "Message is not modified" in str(e):
+                    self.logger.debug(f"Mesaj içeriği aynı, güncelleme atlandı: {message_id}")
+                    return (True, False)  # Başarılı say
+                raise e  # Diğer hataları yukarı fırlat (parse error handling için)
         except Exception as parse_error:
             error_msg = str(parse_error).lower()
             # Markdown parse hatası kontrolü
@@ -554,7 +561,15 @@ class TelegramBotManager:
             
             # ÖNEMLİ: Callback query'ye HEMEN yanıt ver (Telegram timeout'u önlemek için)
             # Telegram'ın callback query timeout'u çok kısa, bu yüzden önce yanıt veriyoruz
-            await query.answer("⏳ Güncelleniyor...")
+            try:
+                await query.answer("⏳ Güncelleniyor...")
+            except Exception as e:
+                # "Query is too old" hatası normaldir (restart sonrası eski butonlara basılırsa)
+                # Bu hatayı logla ama işlemi durdurma (update devam etsin)
+                if "Query is too old" in str(e):
+                    self.logger.warning(f"Callback query zaman aşımı (normal): {str(e)}")
+                else:
+                    self.logger.warning(f"Callback query yanıt hatası: {str(e)}")
             
             # Sinyali veritabanından al
             signal = signal_tracker.repository.get_signal(signal_id)

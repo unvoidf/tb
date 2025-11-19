@@ -148,17 +148,22 @@ class SignalGenerator:
                 return sig, (reason or "NO_SIGNAL")
             return sig
 
-        if df is None or len(df) < 30:  # Minimum 30 mum (50'den düşürüldü)
-            self.logger.debug(f"Insufficient data for analysis: {len(df) if df is not None else 0} candles")
+        # REPAINTING FIX: Sinyal üretimi için SADECE kapanmış mumları kullan.
+        # Son mum (iloc[-1]) henüz kapanmadığı için sürekli değişir (repainting).
+        # Bu yüzden son mumu analizden hariç tutuyoruz.
+        closed_df = df.iloc[:-1]
+        
+        if closed_df is None or len(closed_df) < 30:  # Minimum 30 mum (50'den düşürüldü)
+            self.logger.debug(f"Insufficient data for analysis: {len(closed_df) if closed_df is not None else 0} candles")
             return _ret(None, "INSUFFICIENT_DATA")
         
-        data_length = len(df)
+        data_length = len(closed_df)
         
         # Veri miktarına göre adaptive parametreler
         adaptive_params = self._get_adaptive_parameters(data_length)
         
-        # Teknik göstergeleri hesapla
-        indicators = self.indicator_calc.calculate_all(df)
+        # Teknik göstergeleri hesapla (Kapanmış mumlar üzerinden)
+        indicators = self.indicator_calc.calculate_all(closed_df)
         if not indicators:
             self.logger.debug(f"Technical indicators calculation failed for {data_length} candles")
             return _ret(None, "INDICATOR_ERROR")
@@ -166,11 +171,11 @@ class SignalGenerator:
         regime = self._detect_market_regime(indicators)
         
         # Hacim analizi (adaptive period ile)
-        volume = self.volume_analyzer.analyze(df, adaptive_params['volume_ma_period'])
+        volume = self.volume_analyzer.analyze(closed_df, adaptive_params['volume_ma_period'])
         
         # Volatilite ve trend gücü
         volatility = self.threshold_mgr.calculate_volatility(
-            df, indicators['atr']
+            closed_df, indicators['atr']
         )
         trend_strength = self.threshold_mgr.calculate_trend_strength(
             indicators['adx']['value']
@@ -178,7 +183,8 @@ class SignalGenerator:
         
         if regime == 'ranging':
             # Ranging analyzer'a return_reason=True gönder
-            ranging_signal, reason = self.ranging_analyzer.generate_signal(df, indicators, return_reason=True)
+            # closed_df gönderildiği için ranging analizi de kapanmış mumlara göre yapılacak
+            ranging_signal, reason = self.ranging_analyzer.generate_signal(closed_df, indicators, return_reason=True)
             
             if not ranging_signal:
                 self.logger.debug(f"Ranging analyzer returned no signal ({reason}); skipping timeframe")
@@ -191,7 +197,7 @@ class SignalGenerator:
             strategy_type = ranging_signal.get('strategy_type', 'ranging')
             
             market_context = self._create_market_context(
-                df, indicators, volume, direction, regime
+                closed_df, indicators, volume, direction, regime
             )
             
             # Signals list - bilgi amaçlı (Bollinger & RSI bias)
@@ -227,7 +233,7 @@ class SignalGenerator:
         direction, confidence = self._determine_direction(signals)
         
         market_context = self._create_market_context(
-            df, indicators, volume, direction, regime
+            closed_df, indicators, volume, direction, regime
         )
         
         adjusted_confidence = self.threshold_mgr.adjust_signal_confidence(

@@ -948,12 +948,7 @@ class MessageFormatter:
                     return f"`${price:,.2f}`"
                 return f"`${price:,.6f}`"
 
-            def fmt_money_2(price: float) -> str:
-                """Para miktarını monospace formatında döndürür."""
-                try:
-                    return f"`${float(price):,.2f}`"
-                except Exception:
-                    return "`$-`"
+
 
             # PNL (Kar/Zarar) hesaplama - Direction'a göre doğru formül
             try:
@@ -1057,19 +1052,10 @@ class MessageFormatter:
             pnl_emoji = '✅' if pnl_pct > 0 else '❌' if pnl_pct < 0 else '🔁'
             pnl_status = "Kar" if pnl_pct > 0 else "Zarar" if pnl_pct < 0 else "Nötr"
             
-            # Para miktarı hesapla
-            try:
-                if direction == 'LONG':
-                    pnl_amount = now_price - signal_price
-                else:  # SHORT
-                    pnl_amount = signal_price - now_price
-            except Exception:
-                pnl_amount = 0.0
+
             
             # Durum: "Durum:" yazısı kaldırıldı, sadece emoji ve yüzde gösteriliyor
             lines.append(f"{pnl_emoji} *{pnl_pct:+.2f}%* ({pnl_status})")
-            if abs(pnl_amount) > 0.01:
-                lines.append(f"*PNL:* {fmt_money_2(pnl_amount)}")
             
             # Geçen süre
             # signal_created_at ve current_price_time zaten yukarıda hesaplandı
