@@ -937,7 +937,7 @@ class SignalScannerManager:
                 market_context = {}
             
             # Ticker bilgisi ile market context zenginleştir
-            ticker = self.cmd_handler.market_data.get_ticker_info(symbol)
+            ticker = self.market_data.get_ticker_info(symbol)
             if ticker and market_context:
                 market_context['volume_24h_usd'] = ticker.get('quoteVolume', 0)
                 market_context['price_change_24h_pct'] = ticker.get('percentage', 0)
@@ -1236,8 +1236,8 @@ class SignalScannerManager:
             btc_rsi = 0.0
             
             try:
-                if self.cmd_handler and self.cmd_handler.market_data:
-                    btc_ticker = self.cmd_handler.market_data.get_ticker_info("BTC/USDT")
+                if self.market_data:
+                    btc_ticker = self.market_data.get_ticker_info("BTC/USDT")
                     if btc_ticker:
                         # CCXT standart alanı: 'percentage' (SignalGenerator ile tutarlı)
                         btc_change_24h = float(btc_ticker.get('percentage', 0) or 0)
@@ -1245,7 +1245,7 @@ class SignalScannerManager:
                         if btc_change_24h == 0 and 'info' in btc_ticker:
                             btc_change_24h = float(btc_ticker['info'].get('priceChangePercent', 0) or 0)
                         # RSI için 1h veri çek
-                        btc_1h_data = self.cmd_handler.market_data.fetch_ohlcv("BTC/USDT", "1h", limit=200)
+                        btc_1h_data = self.market_data.fetch_ohlcv("BTC/USDT", "1h", limit=200)
                         if btc_1h_data is not None and len(btc_1h_data) > 0:
                             from analysis.technical_indicators import TechnicalIndicatorCalculator
                             indicator_calc = TechnicalIndicatorCalculator()
