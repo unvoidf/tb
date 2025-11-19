@@ -8,6 +8,7 @@ import time
 from typing import Optional, List, Dict, Tuple
 from utils.logger import LoggerManager
 from utils.retry_handler import RetryHandler
+from utils.exchange_factory import ExchangeFactory
 
 
 class MarketDataManager:
@@ -20,10 +21,7 @@ class MarketDataManager:
         Args:
             retry_handler: Retry mekanizması instance
         """
-        self.exchange = ccxt.binance({
-            'enableRateLimit': True,
-            'options': {'defaultType': 'future'}
-        })
+        self.exchange = ExchangeFactory.create_binance_futures()
         self.retry_handler = retry_handler
         self.logger = LoggerManager().get_logger('MarketData')
 

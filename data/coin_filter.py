@@ -7,6 +7,7 @@ import numpy as np
 from typing import List, Dict
 from utils.logger import LoggerManager
 from utils.retry_handler import RetryHandler
+from utils.exchange_factory import ExchangeFactory
 
 
 class CoinFilter:
@@ -19,10 +20,7 @@ class CoinFilter:
         Args:
             retry_handler: Retry mekanizması instance
         """
-        self.exchange = ccxt.binance({
-            'enableRateLimit': True,
-            'options': {'defaultType': 'future'}
-        })
+        self.exchange = ExchangeFactory.create_binance_futures()
         self.retry_handler = retry_handler
         self.logger = LoggerManager().get_logger('CoinFilter')
     
@@ -151,10 +149,7 @@ class CoinFilter:
         """
         try:
             # Futures exchange instance oluştur
-            futures_exchange = ccxt.binance({
-                'enableRateLimit': True,
-                'options': {'defaultType': 'future'}
-            })
+            futures_exchange = ExchangeFactory.create_binance_futures()
             
             # Futures ticker'ları çek
             tickers = self.retry_handler.execute(

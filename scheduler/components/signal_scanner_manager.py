@@ -4,7 +4,7 @@ Top 5 futures coin'i tarar, güçlü sinyalleri yakalar ve cooldown mekanizması
 """
 import time
 import json
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Union, Tuple, Any
 from utils.logger import LoggerManager
 from data.coin_filter import CoinFilter
 
@@ -698,7 +698,7 @@ class SignalScannerManager:
                     exc_info=True
                 )
     
-    def _send_to_channel(self, message: str, reply_markup=None) -> Optional[int]:
+    def _send_to_channel(self, message: str, reply_markup: Optional[Any] = None) -> Optional[int]:
         """
         Mesajı Telegram kanalına gönderir.
         

@@ -2,7 +2,7 @@
 ApplicationFactory: Uygulama bileşenlerini oluşturan factory.
 Tüm servisleri initialize eder ve bağımlılıkları çözer.
 """
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from core.service_container import ServiceContainer
 from config.config_manager import ConfigManager
 from utils.logger import LoggerManager
@@ -19,7 +19,6 @@ from strategy.position_calculator import PositionCalculator
 from strategy.risk_manager import RiskManager
 from strategy.risk_reward_calculator import RiskRewardCalculator
 from bot.user_whitelist import UserWhitelist
-from bot.message_formatter import MessageFormatter
 from bot.message_formatter import MessageFormatter
 from bot.telegram_bot_manager import TelegramBotManager
 from scheduler.analysis_scheduler import AnalysisScheduler
@@ -140,8 +139,6 @@ class ApplicationFactory:
             'position_calc': position_calc,
             'risk_manager': risk_manager,
             'dynamic_entry_calc': dynamic_entry_calc,
-            'user_whitelist': user_whitelist,
-            'message_formatter': message_formatter,
             'user_whitelist': user_whitelist,
             'message_formatter': message_formatter,
             'telegram_bot': telegram_bot,
@@ -278,7 +275,7 @@ class ApplicationFactory:
     # Command Handler creator removed
     
     def _create_telegram_bot(self, config: ConfigManager, 
-                           reminder_manager=None) -> TelegramBotManager:
+                           reminder_manager: Optional[Any] = None) -> TelegramBotManager:
         """Telegram bot oluşturur."""
         return TelegramBotManager(
             token=config.telegram_token,
@@ -325,7 +322,7 @@ class ApplicationFactory:
                                      signal_repository: SignalRepository,
                                      config: ConfigManager,
                                      risk_reward_calc: RiskRewardCalculator,
-                                     signal_tracker=None) -> SignalScannerManager:
+                                     signal_tracker: Optional[SignalTracker] = None) -> SignalScannerManager:
         """Signal scanner manager oluşturur."""
         return SignalScannerManager(
             coin_filter=coin_filter,

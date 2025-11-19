@@ -8,11 +8,10 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional
 from data.signal_database import SignalDatabase
-from data.repositories.base_repository import BaseRepository
 from utils.logger import LoggerManager
 
 
-class SignalRepository(BaseRepository):
+class SignalRepository:
     """Sinyal veritabanı repository."""
     
     def __init__(self, database: SignalDatabase):
@@ -22,7 +21,6 @@ class SignalRepository(BaseRepository):
         Args:
             database: SignalDatabase instance
         """
-        super().__init__()
         self.db = database
         self.logger = LoggerManager().get_logger('SignalRepository')
     
@@ -100,8 +98,8 @@ class SignalRepository(BaseRepository):
             
             created_at = int(time.time())
             # JSON serialization için dict'leri temizle (numpy/pandas bool'ları Python bool'a çevir)
-            signal_data_clean = self.clean_for_json(signal_data)
-            entry_levels_clean = self.clean_for_json(entry_levels)
+            signal_data_clean = self._clean_for_json(signal_data)
+            entry_levels_clean = self._clean_for_json(entry_levels)
             signal_data_json = json.dumps(signal_data_clean)
             entry_levels_json = json.dumps(entry_levels_clean)
             
@@ -161,7 +159,7 @@ class SignalRepository(BaseRepository):
             conn.close()
             
             if row:
-                return self.row_to_dict(row)
+                return self._row_to_dict(row)
             return None
             
         except Exception as e:
@@ -213,7 +211,7 @@ class SignalRepository(BaseRepository):
             if expired_count > 0:
                 self.logger.info(f"{expired_count} sinyal 72 saatten eski olduğu için aktif listeden çıkarıldı")
             
-            return [self.row_to_dict(row) for row in rows]
+            return [self._row_to_dict(row) for row in rows]
             
         except Exception as e:
             self.logger.error(f"Aktif sinyal getirme hatası: {str(e)}", exc_info=True)
@@ -476,7 +474,96 @@ class SignalRepository(BaseRepository):
             self.logger.error(f"Message deleted işaretleme hatası: {str(e)}", exc_info=True)
             return False
     
+    def _clean_for_json(self, obj):
+        """
+        Dict'i JSON serialization için temizler.
+        Numpy/pandas bool, int, float'ları Python native tiplerine çevirir.
+        
+        Args:
+            obj: Temizlenecek obje (dict, list, veya primitive)
+            
+        Returns:
+            Temizlenmiş obje
+        """
+        if isinstance(obj, dict):
+            return {key: self._clean_for_json(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._clean_for_json(item) for item in obj]
+        elif isinstance(obj, (bool, int, float, str, type(None))):
+            # Python native tipler zaten JSON serializable
+            return obj
+        else:
+            # Numpy/pandas tipleri Python native'e çevir
+            try:
+                import numpy as np
+                # Numpy bool tipleri (np.bool8 yeni versiyonlarda yok)
+                if isinstance(obj, np.bool_):
+                    return bool(obj)
+                # Numpy bool8 kontrolü (eski versiyonlar için)
+                if hasattr(np, 'bool8') and isinstance(obj, np.bool8):
+                    return bool(obj)
+                # Numpy integer tipleri
+                if isinstance(obj, (np.integer, np.int_, np.intc, np.intp, np.int8,
+                                     np.int16, np.int32, np.int64, np.uint8, np.uint16,
+                                     np.uint32, np.uint64)):
+                    return int(obj)
+                # Numpy floating tipleri
+                if isinstance(obj, (np.floating, np.float_, np.float16, np.float32, np.float64)):
+                    return float(obj)
+                # Numpy array
+                if isinstance(obj, np.ndarray):
+                    return obj.tolist()
+            except (ImportError, AttributeError):
+                pass
+            
+            # Pandas tipleri
+            try:
+                import pandas as pd
+                if isinstance(obj, pd.Series):
+                    return obj.tolist()
+                elif isinstance(obj, pd.DataFrame):
+                    return obj.to_dict('records')
+            except ImportError:
+                pass
+            
+            # Son çare: string'e çevir
+            return str(obj)
     
+    def _row_to_dict(self, row: sqlite3.Row) -> Dict:
+        """
+        SQLite Row'u dict'e çevirir.
+        
+        Args:
+            row: SQLite Row
+            
+        Returns:
+            Dict
+        """
+        result = dict(row)
+        
+        # JSON string'leri parse et
+        if result.get('signal_data'):
+            try:
+                result['signal_data'] = json.loads(result['signal_data'])
+            except Exception:
+                result['signal_data'] = {}
+        
+        if result.get('entry_levels'):
+            try:
+                result['entry_levels'] = json.loads(result['entry_levels'])
+            except Exception:
+                result['entry_levels'] = {}
+        
+        # signal_log JSON parse
+        if result.get('signal_log'):
+            try:
+                result['signal_log'] = json.loads(result['signal_log'])
+            except Exception:
+                result['signal_log'] = []
+        else:
+            result['signal_log'] = []
+        
+        return result
     
     def get_latest_active_signal_by_symbol_direction(
         self, symbol: str, direction: str
@@ -514,7 +601,7 @@ class SignalRepository(BaseRepository):
             conn.close()
             
             if row:
-                signal = self.row_to_dict(row)
+                signal = self._row_to_dict(row)
                 self.logger.debug(
                     "Aktif sinyal bulundu: %s %s @ %s (signal_id: %s)",
                     symbol, direction, signal.get('created_at'), signal.get('signal_id')
