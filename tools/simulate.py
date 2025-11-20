@@ -298,7 +298,7 @@ async def send_telegram_report(report_text: str):
     except Exception as e:
         print(f"❌ Failed to send Telegram message: {e}")
 
-def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commission_rate: float, send_telegram: bool = False, summary_only: bool = False, silent: bool = False, auto_optimized: dict = None, mmr: float = DEFAULT_MAINTENANCE_MARGIN_RATE) -> Dict:
+def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commission_rate: float, send_telegram: bool = False, summary_only: bool = False, silent: bool = False, auto_optimized: dict = None, manual_config: dict = None, mmr: float = DEFAULT_MAINTENANCE_MARGIN_RATE) -> Dict:
     report_buffer = []
     
     def log(message: str = "", detail: bool = True):
@@ -610,6 +610,10 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
         log("🔍 Optimizasyon Modu: Otomatik", detail=False)
         log(f"✅ En iyi konfigürasyon: Risk %{auto_optimized['risk']} | Kaldıraç {auto_optimized['leverage']}x", detail=False)
         log("", detail=False)  # Empty line after optimization info
+    elif manual_config:
+        log("📊 Manuel Konfigürasyon", detail=False)
+        log(f"⚙️  Parametreler: Risk %{manual_config['risk']} | Kaldıraç {manual_config['leverage']}x", detail=False)
+        log("", detail=False)  # Empty line after config info
     
     # Financials with emojis
     log("💰 *FİNANSAL ÖZET*", detail=False)
@@ -908,22 +912,37 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if args.send_telegram:
-        # Auto-optimize before sending to Telegram
-        print("🔍 Otomatik optimizasyon çalıştırılıyor...")
-        best_config = run_optimization(args.balance, args.commission, silent=True, mmr=args.mmr)
-        print(f"✅ En iyi konfigürasyon bulundu: Risk %{best_config['risk']} | Kaldıraç {best_config['leverage']}x\n")
-        
-        # Run simulation with best parameters and send to Telegram
-        simulate(
-            initial_balance=args.balance,
-            risk_per_trade=best_config['risk'],
-            leverage=best_config['leverage'],
-            commission_rate=args.commission,
-            send_telegram=True,
-            summary_only=True,
-            auto_optimized=best_config,
-            mmr=args.mmr
-        )
+        # Check if user provided explicit risk/leverage parameters
+        if args.risk != DEFAULT_RISK_PER_TRADE_PERCENT or args.leverage != DEFAULT_LEVERAGE:
+            # User provided explicit parameters, use them instead of optimization
+            print(f"📊 Belirtilen parametrelerle simülasyon çalıştırılıyor: Risk %{args.risk} | Kaldıraç {args.leverage}x\n")
+            simulate(
+                initial_balance=args.balance,
+                risk_per_trade=args.risk,
+                leverage=args.leverage,
+                commission_rate=args.commission,
+                send_telegram=True,
+                summary_only=True,  # Always send summary when using --send-telegram
+                manual_config={'risk': args.risk, 'leverage': args.leverage},
+                mmr=args.mmr
+            )
+        else:
+            # Auto-optimize before sending to Telegram (only if no explicit params)
+            print("🔍 Otomatik optimizasyon çalıştırılıyor...")
+            best_config = run_optimization(args.balance, args.commission, silent=True, mmr=args.mmr)
+            print(f"✅ En iyi konfigürasyon bulundu: Risk %{best_config['risk']} | Kaldıraç {best_config['leverage']}x\n")
+            
+            # Run simulation with best parameters and send to Telegram
+            simulate(
+                initial_balance=args.balance,
+                risk_per_trade=best_config['risk'],
+                leverage=best_config['leverage'],
+                commission_rate=args.commission,
+                send_telegram=True,
+                summary_only=True,
+                auto_optimized=best_config,
+                mmr=args.mmr
+            )
     elif args.opt:
         # Explicit --opt flag: Show all rankings (top 10)
         run_optimization(args.balance, args.commission, show_all_rankings=True, mmr=args.mmr, top_n=10)
