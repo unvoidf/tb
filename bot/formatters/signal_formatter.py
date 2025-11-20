@@ -83,7 +83,8 @@ class SignalFormatter(BaseFormatter):
             direction_title = self.DIRECTION_TITLE.get(direction, direction.upper())
             strategy_type = signal_data.get('strategy_type', 'trend')
             custom_targets = signal_data.get('custom_targets') if isinstance(signal_data.get('custom_targets'), dict) else {}
-            is_ranging_strategy = strategy_type == 'ranging' and bool(custom_targets)
+            # Ranging stratejisi strategy_type ile belirlenir, custom_targets boş olsa bile ranging olabilir
+            is_ranging_strategy = strategy_type == 'ranging'
             forecast_text = 'N/A'
             try:
                 tf_signals = signal_data.get('timeframe_signals')

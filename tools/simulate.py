@@ -288,7 +288,12 @@ async def send_telegram_report(report_text: str):
         chunk_size = 4000
         for i in range(0, len(report_text), chunk_size):
             chunk = report_text[i:i + chunk_size]
-            await bot.send_message(chat_id=admin_id, text=chunk)
+            # Use Markdown parse mode for better mobile formatting
+            try:
+                await bot.send_message(chat_id=admin_id, text=chunk, parse_mode='Markdown')
+            except Exception:
+                # Fallback to plain text if Markdown parsing fails
+                await bot.send_message(chat_id=admin_id, text=chunk)
         print(f"✅ Report sent to admin ID: {admin_id}")
     except Exception as e:
         print(f"❌ Failed to send Telegram message: {e}")
@@ -304,11 +309,7 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
         print(message)
         report_buffer.append(message)
 
-    # Add auto-optimization header if applicable
-    if auto_optimized:
-        log(f"🔍 OTOMATİK OPTİMİZASYON (Profit Factor)", detail=False)
-        log(f"✅ En iyi konfigürasyon: Risk %{auto_optimized['risk']} | Kaldıraç {auto_optimized['leverage']}x", detail=False)
-        log("", detail=False)  # Empty line
+    # Auto-optimization info will be shown after simulation report header
 
     log(f"🚀 Starting Professional Simulation (ISOLATED MARGIN)")
     log(f"💰 Initial Balance: ${initial_balance:,.2f}")
@@ -600,14 +601,18 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
     summary['first_signal_time'] = first_signal_time
     summary['last_signal_time'] = last_signal_time
     
-    # Visual header (Windows Telegram compatible)
-    log("\n" + "="*40, detail=False)
-    log("📊 SİMÜLASYON RAPORU (İzole Margin)", detail=False)
-    log("="*40, detail=False)
+    # Visual header (Mobile-friendly Telegram format)
+    log("📊 *SİMÜLASYON RAPORU (İzole Margin)*", detail=False)
+    log("", detail=False)  # Empty line for spacing
+    
+    # Add auto-optimization info if applicable
+    if auto_optimized:
+        log("🔍 Optimizasyon Modu: Otomatik", detail=False)
+        log(f"✅ En iyi konfigürasyon: Risk %{auto_optimized['risk']} | Kaldıraç {auto_optimized['leverage']}x", detail=False)
+        log("", detail=False)  # Empty line after optimization info
     
     # Financials with emojis
-    log("\n💰 FİNANSAL ÖZET", detail=False)
-    log("-"*40, detail=False)
+    log("💰 *FİNANSAL ÖZET*", detail=False)
     
     pnl_emoji = "📈" if summary['pnl_amount'] > 0 else "📉" if summary['pnl_amount'] < 0 else "➡️"
     log(f"💵 Başlangıç  : ${summary['initial_balance']:>10,.2f}", detail=False)
@@ -618,8 +623,7 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
     log(f"{pnl_color} Net PnL    : {pnl_sign}${summary['pnl_amount']:>9,.2f} ({summary['pnl_percent']:+.2f}%)", detail=False)
 
     # Detailed Statistics
-    log("\n📈 İSTATİSTİKLER", detail=False)
-    log("-"*40, detail=False)
+    log("\n📈 *İSTATİSTİKLER*", detail=False)
     
     win_rate_emoji = "🟢" if summary['win_rate'] >= 60 else "🟡" if summary['win_rate'] >= 50 else "🔴"
     log(f"{win_rate_emoji} Win Rate   : %{summary['win_rate']:.1f} ({summary['wins']}W-{summary['losses']}L)", detail=False)
@@ -638,8 +642,7 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
         log(f"💀 Likidasyon  : {summary['liquidations']} adet ⚠️", detail=False)
     
     # Detailed Analysis
-    log("\n🔍 DETAYLI ANALİZ", detail=False)
-    log("-"*40, detail=False)
+    log("\n🔍 *DETAYLI ANALİZ*", detail=False)
     
     # Average Win/Loss
     if summary['wins'] > 0:
@@ -666,8 +669,6 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
         log(f"📉 SHORT       : {summary['short_stats']['wins']}W/{summary['short_stats']['total']}T (%{summary['short_stats']['win_rate']:.1f})", detail=False)
 
     # AI Insights with visual formatting
-    log("\n🧠 AI ANALİZİ", detail=False)
-    log("-"*40, detail=False)
     
     pf = summary['profit_factor']
     if pf > 2.0: 
@@ -720,9 +721,8 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
         else:
             duration_str = f"{duration_days / 30:.1f} ay"
         
-        log("\n📅 Dönem Bilgisi", detail=False)
-        log("-"*40, detail=False)
-        log(f"📆 {start_date} - {end_date}", detail=False)
+        
+        log(f"\n📆 {start_date} - {end_date}", detail=False)
         log(f"⏱️  Süre: {duration_str}", detail=False)
 
     if send_telegram:
