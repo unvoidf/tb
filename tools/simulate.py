@@ -14,6 +14,7 @@ import os
 import sys
 import asyncio
 import argparse
+import copy
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ DEFAULT_INITIAL_BALANCE = 10000.0
 DEFAULT_RISK_PER_TRADE_PERCENT = 1.0
 DEFAULT_LEVERAGE = 5
 DEFAULT_COMMISSION_RATE = 0.075  # % per side (Binance default)
+DEFAULT_MAINTENANCE_MARGIN_RATE = 0.004  # %0.4 (Binance default for small positions)
 DB_PATH = "data/signals.db"
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 ADMIN_USER_IDS = os.getenv('ADMIN_USER_IDS', '')
@@ -105,6 +107,12 @@ class Portfolio:
         self.balance = self.free_balance + self.locked_margin
         self.update_drawdown()
         self.balance_history.append(self.balance)
+    
+    def pay_commission(self, amount: float):
+        """Deducts commission from balance."""
+        self.free_balance -= amount
+        self.balance = self.free_balance + self.locked_margin
+        self.update_drawdown()
 
     def add_trade_result(self, trade_result: Dict):
         self.trades.append(trade_result)
@@ -116,19 +124,16 @@ class Portfolio:
         total_comm = entry_comm + exit_comm
         self.total_commission_paid += total_comm
         
-        # Net PnL
+        # Gross PnL (komisyonsuz)
         gross_pnl = trade_result['pnl']
+        
+        # Net PnL for statistics (gross_pnl - total_comm)
         net_pnl = gross_pnl - total_comm
         
-        # Update Balances (Margin already released in main loop, just updating stats/equity here? 
-        # No, better to handle balance update here to keep it consistent with previous logic, 
-        # but we need to separate 'release margin' from 'add pnl' if we want strict accounting.
-        # Let's use the `release_margin` method called from main loop for margin, and just track stats here.)
-        
-        # Actually, let's keep `add_trade_result` doing the accounting to avoid split logic.
-        # The main loop will call this.
+        # Update Balances: First add gross PnL, then deduct commission
         margin_used = trade_result['margin_used']
-        self.release_margin(margin_used, net_pnl)
+        self.release_margin(margin_used, gross_pnl)  # Gross PnL ekleniyor
+        self.pay_commission(total_comm)  # Komisyon bakiyeden düşülüyor
         
         direction = trade_result['direction']
         duration = trade_result['duration']
@@ -209,30 +214,6 @@ class Portfolio:
             'balance_history': self.balance_history
         }
 
-def generate_ascii_chart(data: List[float], height: int = 10) -> List[str]:
-    """Generates a simple ASCII line chart."""
-    if not data: return []
-    
-    min_val = min(data)
-    max_val = max(data)
-    range_val = max_val - min_val
-    if range_val == 0: range_val = 1
-    
-    chart = [[' ' for _ in range(len(data))] for _ in range(height)]
-    
-    for x, val in enumerate(data):
-        normalized = (val - min_val) / range_val
-        y = int(normalized * (height - 1))
-        chart[height - 1 - y][x] = '•'
-        
-    lines = []
-    for i, row in enumerate(chart):
-        val = max_val - (i / (height - 1)) * range_val
-        line = f"{val:8.0f} | {''.join(row)}"
-        lines.append(line)
-        
-    return lines
-
 def interpret_results(metrics: Dict) -> List[str]:
     """Generates human-readable insights based on simulation metrics."""
     insights = []
@@ -312,7 +293,7 @@ async def send_telegram_report(report_text: str):
     except Exception as e:
         print(f"❌ Failed to send Telegram message: {e}")
 
-def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commission_rate: float, send_telegram: bool = False, summary_only: bool = False, silent: bool = False, auto_optimized: dict = None) -> Dict:
+def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commission_rate: float, send_telegram: bool = False, summary_only: bool = False, silent: bool = False, auto_optimized: dict = None, mmr: float = DEFAULT_MAINTENANCE_MARGIN_RATE) -> Dict:
     report_buffer = []
     
     def log(message: str = "", detail: bool = True):
@@ -325,20 +306,25 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
 
     # Add auto-optimization header if applicable
     if auto_optimized:
-        log(f"🔍 OTOMATİK OPTİMİZASYON", detail=False)
+        log(f"🔍 OTOMATİK OPTİMİZASYON (Profit Factor)", detail=False)
         log(f"✅ En iyi konfigürasyon: Risk %{auto_optimized['risk']} | Kaldıraç {auto_optimized['leverage']}x", detail=False)
         log("", detail=False)  # Empty line
 
-    log(f"�🚀 Starting Professional Simulation (ISOLATED MARGIN)")
+    log(f"🚀 Starting Professional Simulation (ISOLATED MARGIN)")
     log(f"💰 Initial Balance: ${initial_balance:,.2f}")
     log(f"⚠️  Risk: {risk_per_trade}% | Leverage: {leverage}x | Comm: {commission_rate}%")
     log("-" * 60)
 
+    # Read all signals from database and create immutable snapshot
+    # This ensures deterministic results even if DB is updated during simulation
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM signals ORDER BY created_at ASC")
-    signals = cursor.fetchall()
-    conn.close()
+    signals_raw = cursor.fetchall()
+    conn.close()  # Close connection immediately after reading
+    
+    # Convert sqlite3.Row to dict first, then create deep copy to prevent race conditions
+    signals = [copy.deepcopy(dict(signal)) for signal in signals_raw]
 
     # Track simulation time range
     if signals:
@@ -357,7 +343,7 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
         events.append(Event(
             timestamp=signal['created_at'],
             type='ENTRY',
-            signal=dict(signal),
+            signal=copy.deepcopy(signal),  # Deep copy to ensure immutability
             details={}
         ))
         
@@ -365,39 +351,87 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
         exit_type = None
         exit_price = 0.0
         
-        if signal['tp1_hit']:
-            exit_type = 'EXIT_TP'
-            exit_time = signal['tp1_hit_at'] or (signal['created_at'] + 3600)
-            exit_price = signal['tp1_price']
-        elif signal['sl1_hit'] or signal['sl1_5_hit'] or signal['sl2_hit']:
-            exit_type = 'EXIT_SL'
-            if signal['sl1_hit']:
-                exit_time = signal['sl1_hit_at']
-                exit_price = signal['sl1_price']
-            elif signal['sl1_5_hit']:
-                exit_time = signal['sl1_5_hit_at']
-                exit_price = signal['sl1_5_price']
-            else:
-                exit_time = signal['sl2_hit_at']
-                exit_price = signal['sl2_price']
-            
-            if not exit_time:
-                exit_time = signal['created_at'] + 3600
+        # Collect all possible exits with their timestamps
+        possible_exits = []
+        
+        if signal['tp1_hit'] and signal['tp1_hit_at']:
+            possible_exits.append({
+                'type': 'EXIT_TP',
+                'time': signal['tp1_hit_at'],
+                'price': signal['tp1_price']
+            })
+        
+        if signal['sl1_hit'] and signal['sl1_hit_at']:
+            possible_exits.append({
+                'type': 'EXIT_SL',
+                'time': signal['sl1_hit_at'],
+                'price': signal['sl1_price']
+            })
+        elif signal['sl1_5_hit'] and signal['sl1_5_hit_at']:
+            possible_exits.append({
+                'type': 'EXIT_SL',
+                'time': signal['sl1_5_hit_at'],
+                'price': signal['sl1_5_price']
+            })
+        elif signal['sl2_hit'] and signal['sl2_hit_at']:
+            possible_exits.append({
+                'type': 'EXIT_SL',
+                'time': signal['sl2_hit_at'],
+                'price': signal['sl2_price']
+            })
+        
+        # Select the exit that happened first (chronological order)
+        if possible_exits:
+            # Sort by timestamp to get the earliest exit
+            possible_exits.sort(key=lambda x: x['time'])
+            earliest_exit = possible_exits[0]
+            exit_type = earliest_exit['type']
+            exit_time = earliest_exit['time']
+            exit_price = earliest_exit['price']
         
         if exit_type and exit_time:
             events.append(Event(
                 timestamp=exit_time,
                 type=exit_type,
-                signal=dict(signal),
+                signal=copy.deepcopy(signal),  # Deep copy to ensure immutability
                 details={'exit_price': exit_price}
             ))
 
     events.sort()
+    
+    # Validate chronological order (for debugging)
+    if not silent and not summary_only:
+        log(f"\n📅 ZAMAN DAMGASI DOĞRULAMA:")
+        log(f"   Toplam {len(events)} event bulundu")
+        if len(events) > 0:
+            log(f"   İlk event: {format_timestamp(events[0].timestamp)}")
+            log(f"   Son event: {format_timestamp(events[-1].timestamp)}")
+            
+            # Check for chronological order
+            prev_timestamp = 0
+            out_of_order_count = 0
+            for i, event in enumerate(events):
+                if event.timestamp < prev_timestamp:
+                    out_of_order_count += 1
+                    log(f"   ⚠️  Sıralama hatası: Event {i} ({format_timestamp(event.timestamp)}) önceki event'ten ({format_timestamp(prev_timestamp)}) önce!")
+                prev_timestamp = event.timestamp
+            
+            if out_of_order_count == 0:
+                log(f"   ✅ Tüm event'ler kronolojik sırada")
+            else:
+                log(f"   ❌ {out_of_order_count} event sıralama hatası var!")
+        log("")
 
     # 3. Process Events
     portfolio = Portfolio(initial_balance, commission_rate)
     active_positions: Dict[str, Dict] = {} # signal_id -> position_data
     step = 1
+    
+    # Table header for step-by-step tracking
+    if not silent and not summary_only:
+        log("\n" + "="*120)
+        log(f"{'ADIM':<6} {'TARİH':<20} {'İŞLEM':<12} {'COIN':<15} {'YÖN':<6} {'BAKİYE (ÖNCE)':<15} {'BAKİYE (SONRA)':<15} {'RİSK':<10} {'KOMİSYON':<12} {'NET PNL':<12}")
+        log("="*120)
 
     for event in events:
         current_time_str = format_timestamp(event.timestamp)
@@ -421,13 +455,19 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
             position_size_usd = risk_amount / sl_distance_pct
             margin_required = position_size_usd / leverage
             
-            # Liquidation Calculation
-            # Liq Distance approx = 1 / Leverage
-            liq_distance_pct = 1 / leverage
+            # Liquidation Calculation (Real Binance Formula)
+            # Quantity = position_size_usd / entry_price (coin amount)
+            # LONG: LP = (Entry × Quantity - Margin) / (Quantity × (1 - MMR))
+            # SHORT: LP = (Entry × Quantity + Margin) / (Quantity × (1 + MMR))
+            # MMR (Maintenance Margin Rate) = 0.004 (%0.4) for small positions
+            quantity = position_size_usd / entry_price
+            
             if direction == 'LONG':
-                liq_price = entry_price * (1 - liq_distance_pct)
+                # LONG: Fiyat düştükçe zarar, likidasyon entry'nin altında
+                liq_price = (entry_price * quantity - margin_required) / (quantity * (1 - mmr))
             else:
-                liq_price = entry_price * (1 + liq_distance_pct)
+                # SHORT: Fiyat yükseldikçe zarar, likidasyon entry'nin üstünde
+                liq_price = (entry_price * quantity + margin_required) / (quantity * (1 + mmr))
 
             # Smart Filter: Check if Liq is hit before SL
             # User wouldn't enter a trade if they would get liquidated before hitting SL
@@ -448,9 +488,12 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
                 skip_trade = True
                 skip_reason = f"Yetersiz Serbest Bakiye (Gereken: ${margin_required:.2f}, Mevcut: ${portfolio.free_balance:.2f})"
 
+            balance_before_entry = portfolio.balance
+            
             if skip_trade:
-                log(f"\n[{step}. ADIM] {current_time_str} - ⏭️ SKIP ENTRY {symbol}")
-                log(f"   Sebep: {skip_reason}")
+                if not silent and not summary_only:
+                    log(f"{step:<6} {current_time_str:<20} {'SKIP':<12} {symbol:<15} {'-':<6} ${balance_before_entry:>13.2f} {'-':<15} {'-':<10} {'-':<12} {'-':<12}")
+                    log(f"      Sebep: {skip_reason}")
             else:
                 # Lock Margin
                 portfolio.lock_margin(margin_required)
@@ -462,12 +505,13 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
                     'margin_used': margin_required,
                     'start_time': event.timestamp,
                     'liq_price': liq_price,
-                    'sl_price': sl_price
+                    'sl_price': sl_price,
+                    'risk_amount': risk_amount
                 }
                 
-                log(f"\n[{step}. ADIM] {current_time_str} - 🟢 ENTRY {symbol} ({direction})")
-                log(f"   Fiyat: ${entry_price:.4f} | Liq: ${liq_price:.4f} | Margin: ${margin_required:.2f}")
-                log(f"   Bakiye: ${portfolio.balance:.2f} | Serbest: ${portfolio.free_balance:.2f}")
+                if not silent and not summary_only:
+                    log(f"{step:<6} {current_time_str:<20} {'ENTRY':<12} {symbol:<15} {direction:<6} ${balance_before_entry:>13.2f} ${portfolio.balance:>13.2f} ${risk_amount:>8.2f} {'-':<12} {'-':<12}")
+                    log(f"      Fiyat: ${entry_price:.4f} | Liq: ${liq_price:.4f} | Margin: ${margin_required:.2f} | Serbest: ${portfolio.free_balance:.2f}")
 
         elif event.type in ['EXIT_TP', 'EXIT_SL']:
             if sig_id in active_positions:
@@ -511,11 +555,21 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
                 # Update Portfolio
                 portfolio.open_trades -= 1
                 
+                # Calculate commission before updating portfolio
+                position_size = pos['position_size_usd']
+                entry_comm = position_size * (commission_rate / 100)
+                exit_comm = position_size * (commission_rate / 100)
+                total_comm = entry_comm + exit_comm
+                net_pnl = pnl - total_comm
+                
+                # Store balance before trade result
+                balance_before = portfolio.balance
+                
                 trade_result = {
                     'symbol': symbol,
                     'direction': direction,
                     'status': status,
-                    'pnl': pnl,
+                    'pnl': pnl,  # Gross PnL
                     'margin_used': pos['margin_used'],
                     'position_size': pos['position_size_usd'],
                     'duration': duration
@@ -524,11 +578,14 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
                 
                 del active_positions[sig_id]
                 
-                pnl_str = f"+${pnl:.2f}" if pnl > 0 else f"-${abs(pnl):.2f}"
-                log(f"\n[{step}. ADIM] {current_time_str} - {icon} {symbol}")
-                log(f"   Çıkış: ${exit_price:.4f} | PnL: {pnl_str}")
-                log(f"   Süre: {format_duration_str(duration)}")
-                log(f"   Bakiye: ${portfolio.balance:.2f} | Serbest: ${portfolio.free_balance:.2f}")
+                # Detailed logging
+                gross_pnl_str = f"+${pnl:.2f}" if pnl > 0 else f"-${abs(pnl):.2f}"
+                net_pnl_str = f"+${net_pnl:.2f}" if net_pnl > 0 else f"-${abs(net_pnl):.2f}"
+                
+                if not silent and not summary_only:
+                    risk_amount = pos.get('risk_amount', 0)
+                    log(f"{step:<6} {current_time_str:<20} {status:<12} {symbol:<15} {direction:<6} ${balance_before:>13.2f} ${portfolio.balance:>13.2f} ${risk_amount:>8.2f} ${total_comm:>10.2f} {net_pnl_str:>11}")
+                    log(f"      Çıkış: ${exit_price:.4f} | Gross PnL: {gross_pnl_str} | Süre: {format_duration_str(duration)} | Serbest: ${portfolio.free_balance:.2f}")
             else:
                 pass
 
@@ -543,54 +600,114 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
     summary['first_signal_time'] = first_signal_time
     summary['last_signal_time'] = last_signal_time
     
-    log("\n" + "📊 SİMÜLASYON RAPORU (İzole)", detail=False)
-    log("⎯"*20, detail=False)
+    # Visual header (Windows Telegram compatible)
+    log("\n" + "="*40, detail=False)
+    log("📊 SİMÜLASYON RAPORU (İzole Margin)", detail=False)
+    log("="*40, detail=False)
     
-    # Financials (Perfect Decimal Alignment)
-    log(f"Bakiye   : ${summary['final_balance']:>10,.2f}", detail=False)
-    log(f"Net PnL  : ${summary['pnl_amount']:>10,.2f}  (%{summary['pnl_percent']:.2f})", detail=False)
-    log(f"Komisyon : ${summary['total_commission']:>10,.2f} (%{commission_rate})", detail=False)
-    log("⎯"*20, detail=False)
-
-    # Statistics
-    log("İSTATİSTİKLER", detail=False)
-    log(f"• Win Rate : %{summary['win_rate']:.1f}  ({summary['wins']}W - {summary['losses']}L)", detail=False)
+    # Financials with emojis
+    log("\n💰 FİNANSAL ÖZET", detail=False)
+    log("-"*40, detail=False)
     
-    dd_risk_level = "Orta Risk" if summary['max_drawdown'] > 10 else "Düşük Risk" if summary['max_drawdown'] < 5 else "Yüksek Risk" if summary['max_drawdown'] > 20 else "Makul"
-    log(f"• Max DD   : %{summary['max_drawdown']:.2f} ({dd_risk_level})", detail=False)
-    log(f"• P. Factor: {summary['profit_factor']:.2f}", detail=False)
-    log(f"• Max Seri : {summary['max_win_streak']} Kazanç / {summary['max_loss_streak']} Kayıp", detail=False)
-    log("⎯"*20, detail=False)
+    pnl_emoji = "📈" if summary['pnl_amount'] > 0 else "📉" if summary['pnl_amount'] < 0 else "➡️"
+    log(f"💵 Başlangıç  : ${summary['initial_balance']:>10,.2f}", detail=False)
+    log(f"{pnl_emoji} Final      : ${summary['final_balance']:>10,.2f}", detail=False)
+    
+    pnl_sign = "+" if summary['pnl_amount'] > 0 else ""
+    pnl_color = "🟢" if summary['pnl_amount'] > 0 else "🔴" if summary['pnl_amount'] < 0 else "⚪"
+    log(f"{pnl_color} Net PnL    : {pnl_sign}${summary['pnl_amount']:>9,.2f} ({summary['pnl_percent']:+.2f}%)", detail=False)
 
-    # AI Insights (Minimalist)
-    log("🧠 AI NOTU", detail=False)
+    # Detailed Statistics
+    log("\n📈 İSTATİSTİKLER", detail=False)
+    log("-"*40, detail=False)
+    
+    win_rate_emoji = "🟢" if summary['win_rate'] >= 60 else "🟡" if summary['win_rate'] >= 50 else "🔴"
+    log(f"{win_rate_emoji} Win Rate   : %{summary['win_rate']:.1f} ({summary['wins']}W-{summary['losses']}L)", detail=False)
+    
+    dd_risk_level = "Orta" if summary['max_drawdown'] > 10 else "Düşük" if summary['max_drawdown'] < 5 else "Yüksek" if summary['max_drawdown'] > 20 else "Makul"
+    dd_emoji = "🟢" if summary['max_drawdown'] < 10 else "🟡" if summary['max_drawdown'] < 20 else "🔴"
+    log(f"{dd_emoji} Max DD     : %{summary['max_drawdown']:.2f} ({dd_risk_level})", detail=False)
+    
+    pf_emoji = "🟢" if summary['profit_factor'] > 1.5 else "🟡" if summary['profit_factor'] > 1.0 else "🔴"
+    log(f"{pf_emoji} Profit F.  : {summary['profit_factor']:.2f}", detail=False)
+    
+    log(f"📊 Toplam     : {summary['total_trades']} işlem", detail=False)
+    log(f"💸 Ödenen Kom.: ${portfolio.total_commission_paid:,.2f}", detail=False)
+    
+    if summary['liquidations'] > 0:
+        log(f"💀 Likidasyon  : {summary['liquidations']} adet ⚠️", detail=False)
+    
+    # Detailed Analysis
+    log("\n🔍 DETAYLI ANALİZ", detail=False)
+    log("-"*40, detail=False)
+    
+    # Average Win/Loss
+    if summary['wins'] > 0:
+        log(f"💚 Ort. Kazanç : ${summary['avg_win']:>10,.2f}", detail=False)
+    if summary['losses'] > 0:
+        log(f"❌ Ort. Kayıp  : ${summary['avg_loss']:>10,.2f}", detail=False)
+    
+    # Win/Loss Ratio
+    if summary['avg_loss'] > 0:
+        win_loss_ratio = summary['avg_win'] / summary['avg_loss']
+        log(f"⚖️  K/Z Oranı  : {win_loss_ratio:.2f}x", detail=False)
+    
+    # Streaks
+    streak_emoji = "🔥" if summary['max_win_streak'] >= 5 else "✅"
+    log(f"{streak_emoji} Max Seri    : {summary['max_win_streak']}W/{summary['max_loss_streak']}L", detail=False)
+    
+    # Long/Short Stats
+    if summary['long_stats']['total'] > 0:
+        long_emoji = "🟢" if summary['long_stats']['win_rate'] >= 50 else "🔴"
+        log(f"📊 LONG        : {summary['long_stats']['wins']}W/{summary['long_stats']['total']}T (%{summary['long_stats']['win_rate']:.1f})", detail=False)
+    
+    if summary['short_stats']['total'] > 0:
+        short_emoji = "🟢" if summary['short_stats']['win_rate'] >= 50 else "🔴"
+        log(f"📉 SHORT       : {summary['short_stats']['wins']}W/{summary['short_stats']['total']}T (%{summary['short_stats']['win_rate']:.1f})", detail=False)
+
+    # AI Insights with visual formatting
+    log("\n🧠 AI ANALİZİ", detail=False)
+    log("-"*40, detail=False)
     
     pf = summary['profit_factor']
-    if pf > 2.0: verim = "✅ Verim: Mükemmel."
-    elif pf > 1.5: verim = "✅ Verim: İyi."
-    elif pf > 1.0: verim = "⚠️ Verim: Düşük, risk sınırda."
-    else: verim = "❌ Verim: Zarar."
-    log(f"{verim}", detail=False)
+    if pf > 2.0: 
+        verim = "Verim: Mükemmel 🎯"
+        verim_emoji = "🌟"
+    elif pf > 1.5: 
+        verim = "Verim: İyi 👍"
+        verim_emoji = "✅"
+    elif pf > 1.0: 
+        verim = "Verim: Düşük, risk sınırda"
+        verim_emoji = "⚠️"
+    else: 
+        verim = "Verim: Zarar"
+        verim_emoji = "❌"
+    log(f"{verim_emoji} {verim}", detail=False)
     
     ls = summary['max_loss_streak']
-    if ls >= 5: psikoloji = f"⚠️ {ls} ardışık kayıp psikolojiyi zorlayabilir."
-    else: psikoloji = "✅ Psikoloji: Kontrol altında."
-    log(f"{psikoloji}", detail=False)
+    if ls >= 5: 
+        psikoloji = f"{ls} ardışık kayıp riski"
+        psikoloji_emoji = "😰"
+    else: 
+        psikoloji = "Psikoloji: Kontrol altında"
+        psikoloji_emoji = "😊"
+    log(f"{psikoloji_emoji} {psikoloji}", detail=False)
     
     avg_dur = summary['avg_duration_seconds']
     hours = avg_dur / 3600
     minutes = (avg_dur % 3600) / 60
     if avg_dur < 3600: 
         style = "Scalper (<1 saat)"
+        style_emoji = "⚡"
     elif avg_dur < 86400: 
-        style = f"Day Trader (Ort. {int(hours)}sa {int(minutes)}dk)"
+        style = f"Day Trader ({int(hours)}sa {int(minutes)}dk)"
+        style_emoji = "📅"
     else: 
         style = "Swing Trader (>1 gün)"
-    log(f"ℹ️ Stil: {style}", detail=False)
+        style_emoji = "🗓️"
+    log(f"{style_emoji} {style}", detail=False)
     
-    log("⎯"*20, detail=False)
-    
-    # Display simulation time range
+    # Time Range
     if summary['simulation_duration'] > 0:
         duration_days = summary['simulation_duration'] / 86400
         start_date = format_timestamp(summary['first_signal_time']).split()[0]
@@ -603,7 +720,10 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
         else:
             duration_str = f"{duration_days / 30:.1f} ay"
         
-        log(f"📅 Dönem: {start_date} - {end_date} ({duration_str})", detail=False)
+        log("\n📅 Dönem Bilgisi", detail=False)
+        log("-"*40, detail=False)
+        log(f"📆 {start_date} - {end_date}", detail=False)
+        log(f"⏱️  Süre: {duration_str}", detail=False)
 
     if send_telegram:
         full_report = "\n".join(report_buffer)
@@ -611,15 +731,15 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
         
     return summary
 
-def run_optimization(initial_balance: float, commission_rate: float, silent: bool = False):
+def run_optimization(initial_balance: float, commission_rate: float, silent: bool = False, show_all_rankings: bool = False, mmr: float = DEFAULT_MAINTENANCE_MARGIN_RATE, top_n: int = 10):
     if not silent:
         print(f"🧪 OPTİMİZASYON MODU BAŞLATILIYOR...")
         print(f"💰 Başlangıç Bakiyesi: ${initial_balance:,.2f}")
         print(f"💸 Komisyon Oranı: %{commission_rate}")
         print("-" * 60)
     
-    risk_ranges = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
-    leverage_ranges = [1, 2, 3, 5, 10, 20, 50]
+    risk_ranges = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
+    leverage_ranges = [1, 2, 3, 4, 5, 7, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50]
     
     results = []
     total_combinations = len(risk_ranges) * len(leverage_ranges)
@@ -642,8 +762,23 @@ def run_optimization(initial_balance: float, commission_rate: float, silent: boo
                 commission_rate=commission_rate,
                 send_telegram=False,
                 summary_only=True,
-                silent=True
+                silent=True,
+                mmr=mmr
             )
+            
+            # Calculate risk-adjusted return and composite score
+            # If MaxDD is 0 and PnL > 0, this is the best case (infinite risk-adjusted return)
+            if summary['max_drawdown'] > 0:
+                risk_adj_return = summary['pnl_percent'] / summary['max_drawdown']
+                composite_score = (summary['pnl_percent'] * summary['profit_factor']) / summary['max_drawdown']
+            elif summary['pnl_percent'] > 0:
+                # No drawdown with positive return = perfect scenario
+                risk_adj_return = float('inf')
+                composite_score = float('inf')
+            else:
+                # No drawdown, no profit = neutral
+                risk_adj_return = 0
+                composite_score = 0
             
             results.append({
                 'risk': risk,
@@ -654,20 +789,71 @@ def run_optimization(initial_balance: float, commission_rate: float, silent: boo
                 'profit_factor': summary['profit_factor'],
                 'trades': summary['total_trades'],
                 'liquidations': summary['liquidations'],
-                'risk_adj_return': summary['pnl_percent'] / summary['max_drawdown'] if summary['max_drawdown'] > 0 else 0
+                'risk_adj_return': risk_adj_return,
+                'composite_score': composite_score
             })
-            
-    # Sort by Risk-Adjusted Return (PnL / MaxDD) - Descending
-    results.sort(key=lambda x: x['risk_adj_return'], reverse=True)
     
-    if not silent:
+    # Filter results to only configurations with sufficient data
+    MIN_TRADES = 5  # Minimum trades for statistical significance
+    valid_results = [r for r in results if r['trades'] >= MIN_TRADES]
+    
+    if show_all_rankings and not silent:
+        # Show all ranking methods
         print("\n" + "="*90)
-        print(f"🏆 EN İYİ 10 KONFİGÜRASYON (Risk-Adjusted Return'e Göre)")
+        print("📊 ÇOKLU ANALİZ SONUÇLARI")
+        print(f"ℹ️  Minimum {MIN_TRADES} trade olan konfigürasyonlar gösteriliyor (istatistiksel güvenilirlik)")
+        print("="*90)
+        
+        # 1. Risk-Adjusted Return
+        sorted_rar = sorted(valid_results, key=lambda x: x['risk_adj_return'], reverse=True)
+        print("\n🎯 EN İYİ 5 KONFİGÜRASYON (Risk-Adjusted Return)")
+        print("-" * 90)
+        for i, res in enumerate(sorted_rar[:5]):
+            pnl_str = f"+${res['pnl_amount']:,.0f}" if res['pnl_amount'] > 0 else f"${res['pnl_amount']:,.0f}"
+            print(f"{i+1}. Risk {res['risk']}% | {res['leverage']}x → R/R: {res['risk_adj_return']:.2f} | PnL: {pnl_str} | DD: {res['max_drawdown']:.1f}%")
+        
+        # 2. Maximum PnL
+        sorted_pnl = sorted(valid_results, key=lambda x: x['pnl_amount'], reverse=True)
+        print("\n💰 EN İYİ 5 KONFİGÜRASYON (Maksimum PnL)")
+        print("-" * 90)
+        for i, res in enumerate(sorted_pnl[:5]):
+            pnl_str = f"+${res['pnl_amount']:,.0f}" if res['pnl_amount'] > 0 else f"${res['pnl_amount']:,.0f}"
+            print(f"{i+1}. Risk {res['risk']}% | {res['leverage']}x → PnL: {pnl_str} ({res['pnl_percent']:.1f}%) | DD: {res['max_drawdown']:.1f}% | PF: {res['profit_factor']:.2f}")
+        
+        # 3. Profit Factor (filter out empty configs)
+        valid_results = [r for r in results if r['trades'] > 0]
+        sorted_pf = sorted(valid_results, key=lambda x: x['profit_factor'], reverse=True)
+        print("\n🎯 EN İYİ 5 KONFİGÜRASYON (Profit Factor - Tutarlılık)")
+        print("-" * 90)
+        for i, res in enumerate(sorted_pf[:5]):
+            pnl_str = f"+${res['pnl_amount']:,.0f}" if res['pnl_amount'] > 0 else f"${res['pnl_amount']:,.0f}"
+            print(f"{i+1}. Risk {res['risk']}% | {res['leverage']}x → PF: {res['profit_factor']:.2f} | PnL: {pnl_str} | DD: {res['max_drawdown']:.1f}%")
+        
+        # 4. Composite Score
+        sorted_comp = sorted(valid_results, key=lambda x: x['composite_score'], reverse=True)
+        print("\n⚖️ EN İYİ 5 KONFİGÜRASYON (Composite Score)")
+        print("-" * 90)
+        for i, res in enumerate(sorted_comp[:5]):
+            pnl_str = f"+${res['pnl_amount']:,.0f}" if res['pnl_amount'] > 0 else f"${res['pnl_amount']:,.0f}"
+            print(f"{i+1}. Risk {res['risk']}% | {res['leverage']}x → Score: {res['composite_score']:.2f} | PnL: {pnl_str} | PF: {res['profit_factor']:.2f}")
+        
+        print("\n" + "="*90)
+        print("ℹ️  Profit Factor (PF) varsayılan sıralama kriteri olarak kullanılacak.")
+        print("="*90)
+    elif not silent:
+        # Show PnL-first rankings (default behavior for parameterless run)
+        MIN_TRADES = 5
+        valid_results = [r for r in results if r['trades'] >= MIN_TRADES]
+        
+        # 1. Maximum PnL Ranking (primary)
+        sorted_pnl = sorted(valid_results, key=lambda x: x['pnl_amount'], reverse=True)
+        print("\n" + "="*90)
+        print(f"💰 EN İYİ {top_n} KONFİGÜRASYON (Maksimum PnL) - Min {MIN_TRADES} trade")
         print("="*90)
         print(f"{'Rank':<5} | {'Risk':<6} | {'Lev':<5} | {'PnL ($)':<12} | {'PnL (%)':<8} | {'MaxDD':<8} | {'PF':<6} | {'R/R':<6} | {'Liq':<4}")
         print("-" * 90)
         
-        for i, res in enumerate(results[:10]):
+        for i, res in enumerate(sorted_pnl[:top_n]):
             rank = i + 1
             pnl_str = f"${res['pnl_amount']:,.2f}"
             if res['pnl_amount'] > 0: pnl_str = "+" + pnl_str
@@ -675,9 +861,36 @@ def run_optimization(initial_balance: float, commission_rate: float, silent: boo
             print(f"{rank:<5} | {res['risk']:<4}% | {res['leverage']:<3}x  | {pnl_str:<12} | {res['pnl_percent']:>6.2f}% | {res['max_drawdown']:>6.2f}% | {res['profit_factor']:>4.2f} | {res['risk_adj_return']:>4.2f} | {res['liquidations']:<4}")
             
         print("="*90)
+        
+        # 2. Profit Factor Ranking (secondary)
+        sorted_pf = sorted(valid_results, key=lambda x: x['profit_factor'], reverse=True)
+        print("\n" + "="*90)
+        print(f"🏆 EN İYİ {top_n} KONFİGÜRASYON (Profit Factor) - Min {MIN_TRADES} trade")
+        print("="*90)
+        print(f"{'Rank':<5} | {'Risk':<6} | {'Lev':<5} | {'PnL ($)':<12} | {'PnL (%)':<8} | {'MaxDD':<8} | {'PF':<6} | {'R/R':<6} | {'Liq':<4}")
+        print("-" * 90)
+        
+        for i, res in enumerate(sorted_pf[:top_n]):
+            rank = i + 1
+            pnl_str = f"${res['pnl_amount']:,.2f}"
+            if res['pnl_amount'] > 0: pnl_str = "+" + pnl_str
+            
+            print(f"{rank:<5} | {res['risk']:<4}% | {res['leverage']:<3}x  | {pnl_str:<12} | {res['pnl_percent']:>6.2f}% | {res['max_drawdown']:>6.2f}% | {res['profit_factor']:>4.2f} | {res['risk_adj_return']:>4.2f} | {res['liquidations']:<4}")
+            
+        print("="*90)
+        results = sorted_pnl  # Return PnL sorted for best config selection
+    else:
+        # Silent mode - filter and sort by Profit Factor
+        MIN_TRADES = 5
+        valid_results = [r for r in results if r['trades'] >= MIN_TRADES]
+        results = sorted(valid_results, key=lambda x: x['pnl_amount'], reverse=True)
     
-    # Return best configuration
-    best = results[0]
+    # Return best configuration (always based on Profit Factor, min 5 trades)
+    if len(results) == 0:
+        # Fallback: no config with 5+ trades, use all results
+        results = sorted(results if 'results' in locals() else [], key=lambda x: x.get('profit_factor', 0), reverse=True)
+    
+    best = results[0] if results else {'risk': 1.0, 'leverage': 1}
     return {'risk': best['risk'], 'leverage': best['leverage']}
 
 
@@ -690,13 +903,14 @@ if __name__ == "__main__":
     parser.add_argument('--risk', type=float, default=DEFAULT_RISK_PER_TRADE_PERCENT, help='Risk per trade (%)')
     parser.add_argument('--leverage', type=int, default=DEFAULT_LEVERAGE, help='Leverage (x)')
     parser.add_argument('--commission', type=float, default=DEFAULT_COMMISSION_RATE, help='Commission rate per side (%)')
+    parser.add_argument('--mmr', type=float, default=DEFAULT_MAINTENANCE_MARGIN_RATE, help='Maintenance Margin Rate (default: 0.004 = 0.4%%)')
     
     args = parser.parse_args()
     
     if args.send_telegram:
         # Auto-optimize before sending to Telegram
         print("🔍 Otomatik optimizasyon çalıştırılıyor...")
-        best_config = run_optimization(args.balance, args.commission, silent=True)
+        best_config = run_optimization(args.balance, args.commission, silent=True, mmr=args.mmr)
         print(f"✅ En iyi konfigürasyon bulundu: Risk %{best_config['risk']} | Kaldıraç {best_config['leverage']}x\n")
         
         # Run simulation with best parameters and send to Telegram
@@ -707,16 +921,23 @@ if __name__ == "__main__":
             commission_rate=args.commission,
             send_telegram=True,
             summary_only=True,
-            auto_optimized=best_config
+            auto_optimized=best_config,
+            mmr=args.mmr
         )
     elif args.opt:
-        run_optimization(args.balance, args.commission)
-    else:
+        # Explicit --opt flag: Show all rankings (top 10)
+        run_optimization(args.balance, args.commission, show_all_rankings=True, mmr=args.mmr, top_n=10)
+    elif args.risk != DEFAULT_RISK_PER_TRADE_PERCENT or args.leverage != DEFAULT_LEVERAGE or args.summary:
+        # Explicit simulation parameters provided: Run normal simulation
         simulate(
             initial_balance=args.balance,
             risk_per_trade=args.risk,
             leverage=args.leverage,
             commission_rate=args.commission,
             send_telegram=False,
-            summary_only=args.summary
+            summary_only=args.summary,
+            mmr=args.mmr
         )
+    else:
+        # Default behavior: Run optimization with top 5 results (Profit Factor + PnL)
+        run_optimization(args.balance, args.commission, show_all_rankings=False, mmr=args.mmr, top_n=5)
