@@ -431,7 +431,7 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
     # Table header for step-by-step tracking
     if not silent and not summary_only:
         log("\n" + "="*120)
-        log(f"{'ADIM':<6} {'TARİH':<20} {'İŞLEM':<12} {'COIN':<15} {'YÖN':<6} {'BAKİYE (ÖNCE)':<15} {'BAKİYE (SONRA)':<15} {'RİSK':<10} {'KOMİSYON':<12} {'NET PNL':<12}")
+        log(f"{'ADIM':<6} {'TARİH':<20} {'İŞLEM':<12} {'COIN':<15} {'YÖN':<6} {'SERBEST (ÖNCE)':<15} {'SERBEST (SONRA)':<15} {'RİSK':<10} {'KOMİSYON':<12} {'NET PNL':<12}")
         log("="*120)
 
     for event in events:
@@ -489,11 +489,11 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
                 skip_trade = True
                 skip_reason = f"Yetersiz Serbest Bakiye (Gereken: ${margin_required:.2f}, Mevcut: ${portfolio.free_balance:.2f})"
 
-            balance_before_entry = portfolio.balance
+            free_balance_before = portfolio.free_balance
             
             if skip_trade:
                 if not silent and not summary_only:
-                    log(f"{step:<6} {current_time_str:<20} {'SKIP':<12} {symbol:<15} {'-':<6} ${balance_before_entry:>13.2f} {'-':<15} {'-':<10} {'-':<12} {'-':<12}")
+                    log(f"{step:<6} {current_time_str:<20} {'SKIP':<12} {symbol:<15} {'-':<6} ${free_balance_before:>13.2f} {'-':<15} {'-':<10} {'-':<12} {'-':<12}")
                     log(f"      Sebep: {skip_reason}")
             else:
                 # Lock Margin
@@ -511,8 +511,8 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
                 }
                 
                 if not silent and not summary_only:
-                    log(f"{step:<6} {current_time_str:<20} {'ENTRY':<12} {symbol:<15} {direction:<6} ${balance_before_entry:>13.2f} ${portfolio.balance:>13.2f} ${risk_amount:>8.2f} {'-':<12} {'-':<12}")
-                    log(f"      Fiyat: ${entry_price:.4f} | Liq: ${liq_price:.4f} | Margin: ${margin_required:.2f} | Serbest: ${portfolio.free_balance:.2f}")
+                    log(f"{step:<6} {current_time_str:<20} {'ENTRY':<12} {symbol:<15} {direction:<6} ${free_balance_before:>13.2f} ${portfolio.free_balance:>13.2f} ${risk_amount:>8.2f} {'-':<12} {'-':<12}")
+                    log(f"      Fiyat: ${entry_price:.4f} | Liq: ${liq_price:.4f} | Margin: ${margin_required:.2f} | Toplam: ${portfolio.balance:.2f}")
 
         elif event.type in ['EXIT_TP', 'EXIT_SL']:
             if sig_id in active_positions:
@@ -563,8 +563,8 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
                 total_comm = entry_comm + exit_comm
                 net_pnl = pnl - total_comm
                 
-                # Store balance before trade result
-                balance_before = portfolio.balance
+                # Store free balance before trade result
+                free_balance_before = portfolio.free_balance
                 
                 trade_result = {
                     'symbol': symbol,
@@ -585,8 +585,8 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
                 
                 if not silent and not summary_only:
                     risk_amount = pos.get('risk_amount', 0)
-                    log(f"{step:<6} {current_time_str:<20} {status:<12} {symbol:<15} {direction:<6} ${balance_before:>13.2f} ${portfolio.balance:>13.2f} ${risk_amount:>8.2f} ${total_comm:>10.2f} {net_pnl_str:>11}")
-                    log(f"      Çıkış: ${exit_price:.4f} | Gross PnL: {gross_pnl_str} | Süre: {format_duration_str(duration)} | Serbest: ${portfolio.free_balance:.2f}")
+                    log(f"{step:<6} {current_time_str:<20} {status:<12} {symbol:<15} {direction:<6} ${free_balance_before:>13.2f} ${portfolio.free_balance:>13.2f} ${risk_amount:>8.2f} ${total_comm:>10.2f} {net_pnl_str:>11}")
+                    log(f"      Çıkış: ${exit_price:.4f} | Gross PnL: {gross_pnl_str} | Süre: {format_duration_str(duration)} | Toplam: ${portfolio.balance:.2f}")
             else:
                 pass
 
@@ -900,9 +900,9 @@ if __name__ == "__main__":
     parser.add_argument('--summary', action='store_true', help='Only output condensed summary report')
     parser.add_argument('--opt', action='store_true', help='Run optimization mode (parameter sweep)')
     parser.add_argument('--balance', type=float, default=DEFAULT_INITIAL_BALANCE, help='Initial Balance (USDT)')
-    parser.add_argument('--risk', type=float, default=DEFAULT_RISK_PER_TRADE_PERCENT, help='Risk per trade (%)')
+    parser.add_argument('--risk', type=float, default=DEFAULT_RISK_PER_TRADE_PERCENT, help='Risk per trade (%%)')
     parser.add_argument('--leverage', type=int, default=DEFAULT_LEVERAGE, help='Leverage (x)')
-    parser.add_argument('--commission', type=float, default=DEFAULT_COMMISSION_RATE, help='Commission rate per side (%)')
+    parser.add_argument('--commission', type=float, default=DEFAULT_COMMISSION_RATE, help='Commission rate per side (%%)')
     parser.add_argument('--mmr', type=float, default=DEFAULT_MAINTENANCE_MARGIN_RATE, help='Maintenance Margin Rate (default: 0.004 = 0.4%%)')
     
     args = parser.parse_args()
