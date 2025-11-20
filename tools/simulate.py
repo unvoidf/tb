@@ -325,7 +325,7 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
 
     # Add auto-optimization header if applicable
     if auto_optimized:
-        log(f"� OTOMATİK OPTİMİZASYON", detail=False)
+        log(f"🔍 OTOMATİK OPTİMİZASYON", detail=False)
         log(f"✅ En iyi konfigürasyon: Risk %{auto_optimized['risk']} | Kaldıraç {auto_optimized['leverage']}x", detail=False)
         log("", detail=False)  # Empty line
 
@@ -339,6 +339,16 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
     cursor.execute("SELECT * FROM signals ORDER BY created_at ASC")
     signals = cursor.fetchall()
     conn.close()
+
+    # Track simulation time range
+    if signals:
+        first_signal_time = signals[0]['created_at']
+        last_signal_time = signals[-1]['created_at']
+        simulation_duration = last_signal_time - first_signal_time
+    else:
+        first_signal_time = 0
+        last_signal_time = 0
+        simulation_duration = 0
 
     # 1. Generate Events
     events: List[Event] = []
@@ -528,9 +538,10 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
     summary = portfolio.get_summary()
     insights = interpret_results(summary)
     
-    # Final Report
-    summary = portfolio.get_summary()
-    insights = interpret_results(summary)
+    # Add simulation duration to summary
+    summary['simulation_duration'] = simulation_duration
+    summary['first_signal_time'] = first_signal_time
+    summary['last_signal_time'] = last_signal_time
     
     log("\n" + "📊 SİMÜLASYON RAPORU (İzole)", detail=False)
     log("⎯"*20, detail=False)
@@ -538,7 +549,7 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
     # Financials (Perfect Decimal Alignment)
     log(f"Bakiye   : ${summary['final_balance']:>10,.2f}", detail=False)
     log(f"Net PnL  : ${summary['pnl_amount']:>10,.2f}  (%{summary['pnl_percent']:.2f})", detail=False)
-    log(f"Komisyon : ${summary['total_commission']:>10,.2f}", detail=False)
+    log(f"Komisyon : ${summary['total_commission']:>10,.2f} (%{commission_rate})", detail=False)
     log("⎯"*20, detail=False)
 
     # Statistics
@@ -578,7 +589,21 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
     log(f"ℹ️ Stil: {style}", detail=False)
     
     log("⎯"*20, detail=False)
-    log(f"⚙️ ${initial_balance/1000:.0f}k | Risk %{risk_per_trade} | {leverage}x | %{commission_rate}", detail=False)
+    
+    # Display simulation time range
+    if summary['simulation_duration'] > 0:
+        duration_days = summary['simulation_duration'] / 86400
+        start_date = format_timestamp(summary['first_signal_time']).split()[0]
+        end_date = format_timestamp(summary['last_signal_time']).split()[0]
+        
+        if duration_days < 1:
+            duration_str = f"{duration_days * 24:.1f} saat"
+        elif duration_days < 30:
+            duration_str = f"{duration_days:.1f} gün"
+        else:
+            duration_str = f"{duration_days / 30:.1f} ay"
+        
+        log(f"📅 Dönem: {start_date} - {end_date} ({duration_str})", detail=False)
 
     if send_telegram:
         full_report = "\n".join(report_buffer)
@@ -628,27 +653,28 @@ def run_optimization(initial_balance: float, commission_rate: float, silent: boo
                 'max_drawdown': summary['max_drawdown'],
                 'profit_factor': summary['profit_factor'],
                 'trades': summary['total_trades'],
-                'liquidations': summary['liquidations']
+                'liquidations': summary['liquidations'],
+                'risk_adj_return': summary['pnl_percent'] / summary['max_drawdown'] if summary['max_drawdown'] > 0 else 0
             })
             
-    # Sort by PnL Amount (Descending)
-    results.sort(key=lambda x: x['pnl_amount'], reverse=True)
+    # Sort by Risk-Adjusted Return (PnL / MaxDD) - Descending
+    results.sort(key=lambda x: x['risk_adj_return'], reverse=True)
     
     if not silent:
-        print("\n" + "="*80)
-        print(f"🏆 EN İYİ 10 KONFİGÜRASYON (PnL'e Göre Sıralı)")
-        print("="*80)
-        print(f"{'Rank':<5} | {'Risk':<6} | {'Lev':<5} | {'PnL ($)':<12} | {'PnL (%)':<8} | {'MaxDD':<8} | {'PF':<6} | {'Liq':<4}")
-        print("-" * 80)
+        print("\n" + "="*90)
+        print(f"🏆 EN İYİ 10 KONFİGÜRASYON (Risk-Adjusted Return'e Göre)")
+        print("="*90)
+        print(f"{'Rank':<5} | {'Risk':<6} | {'Lev':<5} | {'PnL ($)':<12} | {'PnL (%)':<8} | {'MaxDD':<8} | {'PF':<6} | {'R/R':<6} | {'Liq':<4}")
+        print("-" * 90)
         
         for i, res in enumerate(results[:10]):
             rank = i + 1
             pnl_str = f"${res['pnl_amount']:,.2f}"
             if res['pnl_amount'] > 0: pnl_str = "+" + pnl_str
             
-            print(f"{rank:<5} | {res['risk']:<4}% | {res['leverage']:<3}x  | {pnl_str:<12} | {res['pnl_percent']:>6.2f}% | {res['max_drawdown']:>6.2f}% | {res['profit_factor']:>4.2f} | {res['liquidations']:<4}")
+            print(f"{rank:<5} | {res['risk']:<4}% | {res['leverage']:<3}x  | {pnl_str:<12} | {res['pnl_percent']:>6.2f}% | {res['max_drawdown']:>6.2f}% | {res['profit_factor']:>4.2f} | {res['risk_adj_return']:>4.2f} | {res['liquidations']:<4}")
             
-        print("="*80)
+        print("="*90)
     
     # Return best configuration
     best = results[0]
