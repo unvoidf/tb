@@ -15,8 +15,9 @@ import sys
 import asyncio
 import argparse
 import copy
+from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from dataclasses import dataclass
 from dotenv import load_dotenv
 from telegram import Bot
@@ -213,6 +214,103 @@ class Portfolio:
             'short_stats': {'total': short_total, 'wins': self.short_wins, 'win_rate': short_win_rate},
             'balance_history': self.balance_history
         }
+
+
+def calculate_liquidation_price(direction: str, entry_price: float, quantity: float, margin: float, mmr: float) -> float:
+    """
+    Approximates Binance isolated-margin liquidation math for a netted slot.
+    """
+    if quantity <= 0 or entry_price <= 0:
+        return 0.0
+
+    try:
+        notional = entry_price * quantity
+        if direction == 'LONG':
+            denom = quantity * (1 - mmr)
+            if denom <= 0:
+                return 0.0
+            return max(0.0, (notional - margin) / denom)
+        else:
+            denom = quantity * (1 + mmr)
+            if denom <= 0:
+                return 0.0
+            return max(0.0, (notional + margin) / denom)
+    except Exception:
+        return 0.0
+
+
+@dataclass
+class PositionSlot:
+    """
+    Binance hedge mode mantığıyla LONG ve SHORT için ayrı net pozisyon slot'u.
+    Aynı yönde gelen tüm işlemler bu slot altında birleşir.
+    """
+    direction: str
+    total_quantity: float = 0.0
+    total_notional: float = 0.0
+    avg_entry_price: float = 0.0
+    margin: float = 0.0
+    liquidation_price: float = 0.0
+
+    def is_active(self) -> bool:
+        return self.total_quantity > 0 and self.margin > 0
+
+    def preview_after_add(self, quantity: float, entry_price: float, margin_added: float, mmr: float) -> Tuple[float, float, float, float]:
+        new_qty = self.total_quantity + quantity
+        new_notional = self.total_notional + (entry_price * quantity)
+        new_avg = (new_notional / new_qty) if new_qty > 0 else 0.0
+        new_margin = self.margin + margin_added
+        new_liq = calculate_liquidation_price(self.direction, new_avg, new_qty, new_margin, mmr)
+        return new_qty, new_avg, new_margin, new_liq
+
+    def apply_add(self, quantity: float, entry_price: float, margin_added: float, mmr: float) -> None:
+        self.total_quantity += quantity
+        self.total_notional += entry_price * quantity
+        if self.total_quantity > 0:
+            self.avg_entry_price = self.total_notional / self.total_quantity
+        else:
+            self.avg_entry_price = 0.0
+        self.margin += margin_added
+        self.liquidation_price = calculate_liquidation_price(
+            self.direction,
+            self.avg_entry_price,
+            self.total_quantity,
+            self.margin,
+            mmr
+        )
+
+    def apply_reduce(self, quantity: float, margin_released: float, mmr: float) -> None:
+        quantity = min(quantity, self.total_quantity)
+        self.total_quantity -= quantity
+        self.total_notional = self.avg_entry_price * self.total_quantity
+        self.margin = max(0.0, self.margin - margin_released)
+
+        if self.total_quantity <= 0 or self.margin <= 0:
+            self.reset()
+        else:
+            self.liquidation_price = calculate_liquidation_price(
+                self.direction,
+                self.avg_entry_price,
+                self.total_quantity,
+                self.margin,
+                mmr
+            )
+
+    def reset(self) -> None:
+        self.total_quantity = 0.0
+        self.total_notional = 0.0
+        self.avg_entry_price = 0.0
+        self.margin = 0.0
+        self.liquidation_price = 0.0
+
+
+def get_position_slot(position_book: Dict[str, Dict[str, PositionSlot]], symbol: str, direction: str) -> PositionSlot:
+    if symbol not in position_book:
+        position_book[symbol] = {
+            'LONG': PositionSlot('LONG'),
+            'SHORT': PositionSlot('SHORT')
+        }
+    return position_book[symbol][direction]
 
 def interpret_results(metrics: Dict) -> List[str]:
     """Generates human-readable insights based on simulation metrics."""
@@ -425,7 +523,8 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
 
     # 3. Process Events
     portfolio = Portfolio(initial_balance, commission_rate)
-    active_positions: Dict[str, Dict] = {} # signal_id -> position_data
+    active_positions: Dict[str, Dict] = {}  # signal_id -> virtual order snapshot
+    position_book: Dict[str, Dict[str, PositionSlot]] = {}
     step = 1
     
     # Table header for step-by-step tracking
@@ -455,34 +554,31 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
             
             position_size_usd = risk_amount / sl_distance_pct
             margin_required = position_size_usd / leverage
-            
-            # Liquidation Calculation (Real Binance Formula)
-            # Quantity = position_size_usd / entry_price (coin amount)
-            # LONG: LP = (Entry × Quantity - Margin) / (Quantity × (1 - MMR))
-            # SHORT: LP = (Entry × Quantity + Margin) / (Quantity × (1 + MMR))
-            # MMR (Maintenance Margin Rate) = 0.004 (%0.4) for small positions
             quantity = position_size_usd / entry_price
-            
-            if direction == 'LONG':
-                # LONG: Fiyat düştükçe zarar, likidasyon entry'nin altında
-                liq_price = (entry_price * quantity - margin_required) / (quantity * (1 - mmr))
-            else:
-                # SHORT: Fiyat yükseldikçe zarar, likidasyon entry'nin üstünde
-                liq_price = (entry_price * quantity + margin_required) / (quantity * (1 + mmr))
 
-            # Smart Filter: Check if Liq is hit before SL
-            # User wouldn't enter a trade if they would get liquidated before hitting SL
+            slot = get_position_slot(position_book, symbol, direction)
+            preview_qty, preview_avg, preview_margin, preview_liq = slot.preview_after_add(
+                quantity, entry_price, margin_required, mmr
+            )
+
             skip_trade = False
             skip_reason = ""
             
+            SAFETY_BUFFER = 0.01  # %1 güvenlik payı
             if direction == 'LONG':
-                if liq_price >= sl_price: # Liq is higher (closer) than SL
+                safe_threshold = sl_price * (1 - SAFETY_BUFFER)
+                if preview_liq >= safe_threshold:
                     skip_trade = True
-                    skip_reason = f"Likidite Riski (Liq: ${liq_price:.4f} > SL: ${sl_price:.4f})"
-            else: # SHORT
-                if liq_price <= sl_price: # Liq is lower (closer) than SL
+                    skip_reason = (
+                        f"Likidite Riski (Liq: ${preview_liq:.4f} ~ SL: ${sl_price:.4f} | Buffer: %{SAFETY_BUFFER*100:.1f})"
+                    )
+            else:
+                safe_threshold = sl_price * (1 + SAFETY_BUFFER)
+                if preview_liq <= safe_threshold:
                     skip_trade = True
-                    skip_reason = f"Likidite Riski (Liq: ${liq_price:.4f} < SL: ${sl_price:.4f})"
+                    skip_reason = (
+                        f"Likidite Riski (Liq: ${preview_liq:.4f} ~ SL: ${sl_price:.4f} | Buffer: %{SAFETY_BUFFER*100:.1f})"
+                    )
 
             # Check Funds (Isolated Margin)
             if not skip_trade and margin_required > portfolio.free_balance:
@@ -500,58 +596,72 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
                 portfolio.lock_margin(margin_required)
                 portfolio.open_trades += 1
                 
+                slot.apply_add(quantity, entry_price, margin_required, mmr)
+
                 active_positions[sig_id] = {
+                    'symbol': symbol,
+                    'direction': direction,
                     'entry_price': entry_price,
                     'position_size_usd': position_size_usd,
+                    'quantity': quantity,
                     'margin_used': margin_required,
                     'start_time': event.timestamp,
-                    'liq_price': liq_price,
+                    'liq_price': slot.liquidation_price,
                     'sl_price': sl_price,
                     'risk_amount': risk_amount
                 }
                 
                 if not silent and not summary_only:
                     log(f"{step:<6} {current_time_str:<20} {'ENTRY':<12} {symbol:<15} {direction:<6} ${free_balance_before:>13.2f} ${portfolio.free_balance:>13.2f} ${risk_amount:>8.2f} {'-':<12} {'-':<12}")
-                    log(f"      Fiyat: ${entry_price:.4f} | Liq: ${liq_price:.4f} | Margin: ${margin_required:.2f} | Toplam: ${portfolio.balance:.2f}")
+                    log(f"      Fiyat: ${entry_price:.4f} | Slot Avg: ${slot.avg_entry_price:.4f} | Liq: ${slot.liquidation_price:.4f} | Margin: ${margin_required:.2f} | Toplam: ${portfolio.balance:.2f}")
 
         elif event.type in ['EXIT_TP', 'EXIT_SL']:
             if sig_id in active_positions:
                 pos = active_positions[sig_id]
                 exit_price = event.details['exit_price']
                 duration = event.timestamp - pos['start_time']
-                
+                quantity = pos['quantity']
+                margin_used = pos['margin_used']
+                symbol = pos['symbol']
+                direction = pos['direction']
+
+                slot = get_position_slot(position_book, symbol, direction)
+                slot_liq = slot.liquidation_price if slot.is_active() else pos['liq_price']
+                avg_entry_for_close = slot.avg_entry_price if slot.is_active() else pos['entry_price']
+
                 # Liquidation Check
                 is_liquidated = False
                 if direction == 'LONG':
-                    if pos['sl_price'] <= pos['liq_price']: # SL is below Liq Price -> Guaranteed Liq
+                    if pos['sl_price'] <= slot_liq:
                         is_liquidated = True
-                        exit_price = pos['liq_price']
-                    elif exit_price <= pos['liq_price']: # Hit Liq Price
+                        exit_price = slot_liq
+                    elif exit_price <= slot_liq:
                         is_liquidated = True
-                        exit_price = pos['liq_price']
-                else: # SHORT
-                    if pos['sl_price'] >= pos['liq_price']: # SL is above Liq Price -> Guaranteed Liq
+                        exit_price = slot_liq
+                else:
+                    if pos['sl_price'] >= slot_liq:
                         is_liquidated = True
-                        exit_price = pos['liq_price']
-                    elif exit_price >= pos['liq_price']: # Hit Liq Price
+                        exit_price = slot_liq
+                    elif exit_price >= slot_liq:
                         is_liquidated = True
-                        exit_price = pos['liq_price']
+                        exit_price = slot_liq
 
                 # Calculate PnL
                 if is_liquidated:
-                    pnl = -pos['margin_used'] # Lose entire margin
+                    pnl = -margin_used
                     status = 'LIQUIDATED'
                     icon = "💀 LIQUIDATED"
                 else:
-                    price_change_pct = 0.0
                     if direction == 'LONG':
-                        price_change_pct = (exit_price - pos['entry_price']) / pos['entry_price']
+                        price_change = exit_price - avg_entry_for_close
                     else:
-                        price_change_pct = (pos['entry_price'] - exit_price) / pos['entry_price']
-                    
-                    pnl = pos['position_size_usd'] * price_change_pct
+                        price_change = avg_entry_for_close - exit_price
+                    pnl = price_change * quantity
                     status = 'WIN' if event.type == 'EXIT_TP' else 'LOSS'
                     icon = "✅ WIN" if event.type == 'EXIT_TP' else "❌ LOSS"
+
+                # Update aggregated slot before releasing funds
+                slot.apply_reduce(quantity, margin_used, mmr)
 
                 # Update Portfolio
                 portfolio.open_trades -= 1
@@ -571,8 +681,8 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
                     'direction': direction,
                     'status': status,
                     'pnl': pnl,  # Gross PnL
-                    'margin_used': pos['margin_used'],
-                    'position_size': pos['position_size_usd'],
+                    'margin_used': margin_used,
+                    'position_size': position_size,
                     'duration': duration
                 }
                 portfolio.add_trade_result(trade_result)
@@ -586,7 +696,7 @@ def simulate(initial_balance: float, risk_per_trade: float, leverage: int, commi
                 if not silent and not summary_only:
                     risk_amount = pos.get('risk_amount', 0)
                     log(f"{step:<6} {current_time_str:<20} {status:<12} {symbol:<15} {direction:<6} ${free_balance_before:>13.2f} ${portfolio.free_balance:>13.2f} ${risk_amount:>8.2f} ${total_comm:>10.2f} {net_pnl_str:>11}")
-                    log(f"      Çıkış: ${exit_price:.4f} | Gross PnL: {gross_pnl_str} | Süre: {format_duration_str(duration)} | Toplam: ${portfolio.balance:.2f}")
+                    log(f"      Çıkış: ${exit_price:.4f} | Slot Avg: ${avg_entry_for_close:.4f} | Gross PnL: {gross_pnl_str} | Süre: {format_duration_str(duration)} | Toplam: ${portfolio.balance:.2f}")
             else:
                 pass
 
