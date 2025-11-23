@@ -148,6 +148,8 @@ class SignalFormatter(BaseFormatter):
             signal_created_at = created_at if created_at else int(time.time())
             signal_datetime = self.format_timestamp(signal_created_at)
             lines.append(f"🕐 {signal_datetime}")
+            if signal_id:
+                lines.append(f"🆔 ID: `{signal_id}`")
             lines.append("")
             
             # Sinyal ve Güncel Fiyat
@@ -276,6 +278,24 @@ class SignalFormatter(BaseFormatter):
                             tps.append(f"🎯 TP{idx} {fmt_price(tp_price)} ({tp_pct:+.2f}%) {hit_emoji}")
                 lines.extend(tps)
             lines.append("")
+            
+            # Liquidation Risk Bilgisi (eğer varsa)
+            liquidation_risk_pct = signal_data.get('liquidation_risk_percentage')
+            if liquidation_risk_pct is not None:
+                # Risk seviyesine göre emoji seç
+                if liquidation_risk_pct < 20:
+                    risk_emoji = "🟢"  # Düşük risk
+                    risk_text = "Düşük"
+                elif liquidation_risk_pct < 50:
+                    risk_emoji = "🟡"  # Orta risk
+                    risk_text = "Orta"
+                else:
+                    risk_emoji = "🔴"  # Yüksek risk
+                    risk_text = "Yüksek"
+                
+                lines.append(f"{risk_emoji} *Likidite Riski:* %{liquidation_risk_pct:.2f} ({risk_text})")
+                lines.append("")
+            
             # SL seviyeleri (başlık kaldırıldı, direkt SL gösteriliyor)
             
             # SL seviyelerini sadeleştir: Tek bir SL listesi göster

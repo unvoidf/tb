@@ -4,6 +4,7 @@ Simulation Engine
 Core simulation engine for event-driven backtesting.
 """
 import copy
+import os
 from typing import List, Dict, Optional, Any
 from .models import Event
 from .portfolio import Portfolio
@@ -14,6 +15,7 @@ from .notification_manager import NotificationManager
 from .utils import format_timestamp, format_duration_str
 
 DEFAULT_MAINTENANCE_MARGIN_RATE = 0.004  # %0.4 (Binance default)
+DEFAULT_MIN_SL_LIQ_BUFFER = 0.01  # %1 (default buffer between SL and liquidation)
 
 
 class SimulationEngine:
@@ -26,6 +28,7 @@ class SimulationEngine:
         leverage: int,
         commission_rate: float,
         mmr: float = DEFAULT_MAINTENANCE_MARGIN_RATE,
+        min_sl_liq_buffer: Optional[float] = None,
         db_path: str = "data/signals.db"
     ):
         self.initial_balance = initial_balance
@@ -33,6 +36,7 @@ class SimulationEngine:
         self.leverage = leverage
         self.commission_rate = commission_rate
         self.mmr = mmr
+        self.min_sl_liq_buffer = min_sl_liq_buffer or self._load_min_sl_liq_buffer()
         
         self.db_manager = DatabaseManager(db_path)
         self.portfolio: Optional[Portfolio] = None
@@ -147,22 +151,22 @@ class SimulationEngine:
         skip_trade = False
         skip_reason = ""
         
-        SAFETY_BUFFER = 0.01  # %1 güvenlik payı
+        # Use configurable buffer from .env (OPTIMIZE_MIN_SL_LIQ_BUFFER)
         if direction == 'LONG':
-            safe_threshold = sl_price * (1 - SAFETY_BUFFER)
+            safe_threshold = sl_price * (1 - self.min_sl_liq_buffer)
             if preview_liq >= safe_threshold:
                 skip_trade = True
                 skip_reason = (
                     f"Likidite Riski (Liq: ${preview_liq:.4f} ~ SL: ${sl_price:.4f} | "
-                    f"Buffer: %{SAFETY_BUFFER*100:.1f})"
+                    f"Buffer: %{self.min_sl_liq_buffer*100:.1f})"
                 )
         else:
-            safe_threshold = sl_price * (1 + SAFETY_BUFFER)
+            safe_threshold = sl_price * (1 + self.min_sl_liq_buffer)
             if preview_liq <= safe_threshold:
                 skip_trade = True
                 skip_reason = (
                     f"Likidite Riski (Liq: ${preview_liq:.4f} ~ SL: ${sl_price:.4f} | "
-                    f"Buffer: %{SAFETY_BUFFER*100:.1f})"
+                    f"Buffer: %{self.min_sl_liq_buffer*100:.1f})"
                 )
 
         # Check Funds (Isolated Margin)
@@ -453,4 +457,12 @@ class SimulationEngine:
             self.notification_manager.send_report(full_report)
         
         return summary
+    
+    def _load_min_sl_liq_buffer(self) -> float:
+        """Load minimum SL-Liq buffer from .env or use default."""
+        try:
+            val = os.getenv('OPTIMIZE_MIN_SL_LIQ_BUFFER')
+            return float(val) if val is not None else DEFAULT_MIN_SL_LIQ_BUFFER
+        except Exception:
+            return DEFAULT_MIN_SL_LIQ_BUFFER
 

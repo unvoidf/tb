@@ -89,6 +89,77 @@ class ConfigManager:
         self.risk_high = 0.05  # %5
         self.leverage_min = 1
         self.leverage_max = 10
+    
+    def _parse_float_list(self, env_var: str, default: List[float]) -> List[float]:
+        """Parse comma-separated float list from environment variable."""
+        val = os.getenv(env_var)
+        if not val:
+            return default
+        try:
+            return [float(x.strip()) for x in val.split(',') if x.strip()]
+        except Exception:
+            return default
+    
+    def _parse_int_list(self, env_var: str, default: List[int]) -> List[int]:
+        """Parse comma-separated int list from environment variable."""
+        val = os.getenv(env_var)
+        if not val:
+            return default
+        try:
+            return [int(x.strip()) for x in val.split(',') if x.strip()]
+        except Exception:
+            return default
+    
+    @property
+    def optimize_risk_ranges(self) -> List[float]:
+        """Optimization engine için risk aralıkları."""
+        default = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
+        return self._parse_float_list('OPTIMIZE_RISK_RANGES', default)
+    
+    @property
+    def optimize_leverage_ranges(self) -> List[int]:
+        """Optimization engine için kaldıraç aralıkları."""
+        default = [1, 2, 3, 4, 5, 7, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50]
+        return self._parse_int_list('OPTIMIZE_LEVERAGE_RANGES', default)
+    
+    @property
+    def optimize_min_sl_liq_buffer(self) -> float:
+        """Simulation engine için SL ile liquidation arası minimum buffer (default: 0.01 = %1)."""
+        try:
+            val = os.getenv('OPTIMIZE_MIN_SL_LIQ_BUFFER')
+            return float(val) if val is not None else 0.01
+        except Exception:
+            return 0.01
+    
+    @property
+    def safetyfilter_risk_ranges(self) -> List[float]:
+        """Liquidation safety filter için risk aralıkları."""
+        default = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
+        return self._parse_float_list('SAFETYFILTER_RISK_RANGES', default)
+    
+    @property
+    def safetyfilter_leverage_ranges(self) -> List[int]:
+        """Liquidation safety filter için kaldıraç aralıkları."""
+        default = [1, 2, 3, 4, 5, 7, 10, 12, 15, 20]
+        return self._parse_int_list('SAFETYFILTER_LEVERAGE_RANGES', default)
+    
+    @property
+    def safetyfilter_min_sl_liq_buffer(self) -> float:
+        """SL ile liquidation arası minimum buffer (default: 0.01 = %1)."""
+        try:
+            val = os.getenv('SAFETYFILTER_MIN_SL_LIQ_BUFFER')
+            return float(val) if val is not None else 0.01
+        except Exception:
+            return 0.01
+    
+    @property
+    def mmr(self) -> float:
+        """Maintenance Margin Rate (default: 0.004 = 0.4%)."""
+        try:
+            val = os.getenv('MAINTENANCE_MARGIN_RATE')
+            return float(val) if val is not None else 0.004
+        except Exception:
+            return 0.004
         
     def _load_fibonacci_levels(self) -> None:
         """Fibonacci seviyelerini yükler."""
@@ -202,11 +273,51 @@ class ConfigManager:
     
     @property
     def log_config(self) -> Dict[str, any]:
-        """Log konfigürasyonunu döndürür."""
+        """Log konfigürasyonunu döndürür (.env'den okur)."""
+        # LOG_MAX_BYTES (default: 10MB)
+        try:
+            max_bytes_str = os.getenv('LOG_MAX_BYTES')
+            max_bytes = int(max_bytes_str) if max_bytes_str else (10 * 1024 * 1024)  # 10MB default
+        except (ValueError, TypeError):
+            max_bytes = 10 * 1024 * 1024  # 10MB default
+        
+        # LOG_BACKUP_COUNT (default: 5)
+        try:
+            backup_count_str = os.getenv('LOG_BACKUP_COUNT')
+            backup_count = int(backup_count_str) if backup_count_str else 5
+        except (ValueError, TypeError):
+            backup_count = 5
+        
+        # LOG_DIR (default: 'logs')
+        log_dir = os.getenv('LOG_DIR', 'logs')
+        
+        # LOG_ASYNC_ENABLED (default: True)
+        async_str = os.getenv('LOG_ASYNC_ENABLED', 'true').lower()
+        async_enabled = async_str in ('true', '1', 'yes')
+        
+        # LOG_ROTATION_TYPE (default: 'both')
+        rotation_type = os.getenv('LOG_ROTATION_TYPE', 'both').lower()
+        if rotation_type not in ('size', 'time', 'both'):
+            rotation_type = 'both'
+        
+        # LOG_ROTATION_WHEN (default: 'midnight')
+        rotation_when = os.getenv('LOG_ROTATION_WHEN', 'midnight').lower()
+        
+        # LOG_ROTATION_INTERVAL (default: 1)
+        try:
+            rotation_interval_str = os.getenv('LOG_ROTATION_INTERVAL', '1')
+            rotation_interval = int(rotation_interval_str)
+        except (ValueError, TypeError):
+            rotation_interval = 1
+        
         return {
-            'max_bytes': 10 * 1024 * 1024,  # 10MB
-            'backup_count': 5,
-            'log_dir': 'logs'
+            'max_bytes': max_bytes,
+            'backup_count': backup_count,
+            'log_dir': log_dir,
+            'async_enabled': async_enabled,
+            'rotation_type': rotation_type,
+            'rotation_when': rotation_when,
+            'rotation_interval': rotation_interval
         }
 
     def _load_phase1_env(self) -> None:

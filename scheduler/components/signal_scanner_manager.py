@@ -14,6 +14,7 @@ from bot.telegram_bot_manager import TelegramBotManager
 from scheduler.components.signal_ranker import SignalRanker
 from data.signal_repository import SignalRepository
 from strategy.risk_reward_calculator import RiskRewardCalculator
+from strategy.liquidation_safety_filter import LiquidationSafetyFilter
 from analysis.signal_generator import SignalGenerator
 from data.market_data_manager import MarketDataManager
 
@@ -35,6 +36,7 @@ class SignalScannerManager:
         cooldown_hours: int = 1,
         ranging_min_sl_percent: float = 0.5,
         risk_reward_calc: Optional[RiskRewardCalculator] = None,
+        liquidation_safety_filter: Optional[LiquidationSafetyFilter] = None,
         signal_tracker: Optional[object] = None  # SignalTracker instance (optional)
     ):
         """
@@ -68,6 +70,7 @@ class SignalScannerManager:
         self.confidence_threshold = confidence_threshold
         self.cooldown_seconds = cooldown_hours * 3600
         self.risk_reward_calc = risk_reward_calc  # Risk/Reward calculator
+        self.liquidation_safety_filter = liquidation_safety_filter  # Liquidation safety filter
         self.signal_tracker = signal_tracker  # SignalTracker instance (optional, for message updates)
         self.ranging_min_sl_percent = ranging_min_sl_percent
         
@@ -540,6 +543,8 @@ class SignalScannerManager:
             # Dynamic entry levels hesapla
             direction = signal_data.get('direction')
             confidence = signal_data.get('confidence', 0.0)
+            strategy_type = signal_data.get('strategy_type', 'trend')
+            custom_targets = signal_data.get('custom_targets') if isinstance(signal_data.get('custom_targets'), dict) else {}
             
             # OHLCV verisi al (entry calculation için)
             df = None
@@ -577,6 +582,51 @@ class SignalScannerManager:
             signal_id = None
             if self.signal_repository:
                 signal_id = self.signal_repository.generate_signal_id(symbol)
+
+            # Liquidation risk analizi (Telegram mesajında gösterilmek için - format_signal_alert'ten ÖNCE)
+            if self.liquidation_safety_filter:
+                try:
+                    # TP/SL seviyelerini hesapla (liquidation risk analizi için)
+                    if strategy_type == 'ranging' and custom_targets:
+                        tp_sl_levels = self._build_custom_tp_sl_levels(custom_targets)
+                    else:
+                        tp_sl_levels = self._calculate_tp_sl_levels(
+                            signal_price=signal_price,
+                            direction=direction,
+                            atr=atr,
+                            timeframe='1h'
+                        )
+                    
+                    # SL fiyatını al (sl2_price öncelikli, yoksa sl1_price)
+                    sl_price = tp_sl_levels.get('sl2_price') or tp_sl_levels.get('sl1_price')
+                    
+                    if sl_price and sl_price > 0:
+                        # Varsayılan balance (gerçek piyasada config'den okunabilir)
+                        default_balance = 10000.0  # USDT
+                        
+                        liquidation_risk_percentage = self.liquidation_safety_filter.calculate_liquidation_risk_percentage(
+                            entry_price=signal_price,
+                            sl_price=sl_price,
+                            direction=direction,
+                            balance=default_balance
+                        )
+                        
+                        # signal_data içine ekle (Telegram mesajında gösterilmek için)
+                        if 'liquidation_risk_percentage' not in signal_data:
+                            signal_data['liquidation_risk_percentage'] = liquidation_risk_percentage
+                        
+                        # Log'a yaz
+                        self.logger.info(
+                            f"Bu sinyal %{liquidation_risk_percentage:.2f} likidite riski taşımaktadır. "
+                            f"(Signal ID: {signal_id}, Symbol: {symbol})"
+                        )
+                        
+                except Exception as liq_error:
+                    self.logger.warning(
+                        f"Liquidation risk analizi yapılamadı: {str(liq_error)} - "
+                        f"Signal ID: {signal_id}, Symbol: {symbol}",
+                        exc_info=True
+                    )
 
             # Mesaj formatla
             message = self.formatter.format_signal_alert(

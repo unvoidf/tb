@@ -3,6 +3,7 @@ Optimization Engine
 -------------------
 Parameter optimization engine for simulation.
 """
+import os
 from typing import Dict, List
 from .simulation_engine import SimulationEngine, DEFAULT_MAINTENANCE_MARGIN_RATE
 
@@ -38,10 +39,9 @@ class OptimizationEngine:
             print(f"💸 Komisyon Oranı: %{self.commission_rate}")
             print("-" * 60)
         
-        risk_ranges = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
-        leverage_ranges = [
-            1, 2, 3, 4, 5, 7, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50
-        ]
+        # Load ranges from .env or use defaults
+        risk_ranges = self._load_risk_ranges()
+        leverage_ranges = self._load_leverage_ranges()
         
         results = []
         total_combinations = len(risk_ranges) * len(leverage_ranges)
@@ -243,6 +243,28 @@ class OptimizationEngine:
         print("\n" + "="*90)
         print("ℹ️  Profit Factor (PF) varsayılan sıralama kriteri olarak kullanılacak.")
         print("="*90)
+    
+    def _load_risk_ranges(self) -> List[float]:
+        """Load risk ranges from .env or use defaults."""
+        default = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
+        val = os.getenv('OPTIMIZE_RISK_RANGES')
+        if not val:
+            return default
+        try:
+            return [float(x.strip()) for x in val.split(',') if x.strip()]
+        except Exception:
+            return default
+    
+    def _load_leverage_ranges(self) -> List[int]:
+        """Load leverage ranges from .env or use defaults."""
+        default = [1, 2, 3, 4, 5, 7, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50]
+        val = os.getenv('OPTIMIZE_LEVERAGE_RANGES')
+        if not val:
+            return default
+        try:
+            return [int(x.strip()) for x in val.split(',') if x.strip()]
+        except Exception:
+            return default
     
     def _show_default_rankings(
         self, 

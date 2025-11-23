@@ -18,6 +18,7 @@ from analysis.ranging_strategy_analyzer import RangingStrategyAnalyzer
 from strategy.position_calculator import PositionCalculator
 from strategy.risk_manager import RiskManager
 from strategy.risk_reward_calculator import RiskRewardCalculator
+from strategy.liquidation_safety_filter import LiquidationSafetyFilter
 from bot.user_whitelist import UserWhitelist
 from bot.message_formatter import MessageFormatter
 from bot.telegram_bot_manager import TelegramBotManager
@@ -111,11 +112,14 @@ class ApplicationFactory:
         risk_reward_calc = RiskRewardCalculator()
         self.container.register_singleton(RiskRewardCalculator, risk_reward_calc)
         
+        # Liquidation Safety Filter
+        liquidation_safety_filter = self._create_liquidation_safety_filter(config)
+        
         # Signal Scanner System (SignalTracker'ı inject et)
         signal_scanner_manager = self._create_signal_scanner_manager(
             coin_filter, market_data, signal_generator, dynamic_entry_calc, 
             message_formatter, telegram_bot, signal_repository, config,
-            risk_reward_calc, signal_tracker=signal_tracker
+            risk_reward_calc, liquidation_safety_filter, signal_tracker=signal_tracker
         )
         signal_scanner_scheduler = self._create_signal_scanner_scheduler(signal_scanner_manager)
         
@@ -161,7 +165,11 @@ class ApplicationFactory:
         return LoggerManager(
             log_dir=log_cfg['log_dir'],
             max_bytes=log_cfg['max_bytes'],
-            backup_count=log_cfg['backup_count']
+            backup_count=log_cfg['backup_count'],
+            async_enabled=log_cfg['async_enabled'],
+            rotation_type=log_cfg['rotation_type'],
+            rotation_when=log_cfg['rotation_when'],
+            rotation_interval=log_cfg['rotation_interval']
         )
     
     def _create_retry_handler(self, config: ConfigManager) -> RetryHandler:
@@ -313,6 +321,13 @@ class ApplicationFactory:
         """Signal repository oluşturur."""
         return SignalRepository(database)
     
+    def _create_liquidation_safety_filter(self, config: ConfigManager) -> LiquidationSafetyFilter:
+        """Liquidation safety filter oluşturur."""
+        return LiquidationSafetyFilter(
+            mmr=config.mmr,
+            min_sl_liq_buffer=None  # .env'den otomatik okunacak (SAFETYFILTER_MIN_SL_LIQ_BUFFER)
+        )
+    
     def _create_signal_scanner_manager(self, coin_filter: CoinFilter,
                                      market_data: MarketDataManager,
                                      signal_generator: SignalGenerator,
@@ -322,6 +337,7 @@ class ApplicationFactory:
                                      signal_repository: SignalRepository,
                                      config: ConfigManager,
                                      risk_reward_calc: RiskRewardCalculator,
+                                     liquidation_safety_filter: LiquidationSafetyFilter,
                                      signal_tracker: Optional[SignalTracker] = None) -> SignalScannerManager:
         """Signal scanner manager oluşturur."""
         return SignalScannerManager(
@@ -337,6 +353,7 @@ class ApplicationFactory:
             cooldown_hours=config.cooldown_hours,  # from .env or default 1
             risk_reward_calc=risk_reward_calc,  # Risk/Reward calculator
             ranging_min_sl_percent=config.ranging_min_sl_percent,
+            liquidation_safety_filter=liquidation_safety_filter,  # Liquidation safety filter
             signal_tracker=signal_tracker  # SignalTracker instance (optional, for cooldown log updates)
         )
     
