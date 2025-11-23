@@ -390,12 +390,13 @@ class RangingStrategyAnalyzer:
             
             if direction == "LONG":
                 base_stop = bb_lower - buffer
-                # Minimum mesafe kontrolü
-                min_stop_dist = current_price * 0.01 # Min %1 stop
+                # Minimum mesafe kontrolü (RANGING_MIN_SL_PERCENT'ten alınır)
+                min_stop_dist = current_price * self.min_stop_distance_ratio
                 stop_price = min(base_stop, current_price - min_stop_dist)
             else:
                 base_stop = bb_upper + buffer
-                min_stop_dist = current_price * 0.01 # Min %1 stop
+                # Minimum mesafe kontrolü (RANGING_MIN_SL_PERCENT'ten alınır)
+                min_stop_dist = current_price * self.min_stop_distance_ratio
                 stop_price = max(base_stop, current_price + min_stop_dist)
                 
             sl_label = "Bollinger Band Breach (+Buffer)"
