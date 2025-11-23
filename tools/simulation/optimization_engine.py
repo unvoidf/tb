@@ -129,6 +129,8 @@ class OptimizationEngine:
             self._show_all_rankings(valid_results, dynamic_threshold)
         elif not silent:
             self._show_default_rankings(valid_results, dynamic_threshold, top_n)
+            # Show Golden Combination after default rankings
+            self._find_and_show_golden_combination(valid_results)
             results = sorted(valid_results, key=lambda x: x['pnl_amount'], reverse=True)
         else:
             # Silent mode - filter and sort by PnL
@@ -243,6 +245,71 @@ class OptimizationEngine:
         print("\n" + "="*90)
         print("ℹ️  Profit Factor (PF) varsayılan sıralama kriteri olarak kullanılacak.")
         print("="*90)
+    
+    def _find_and_show_golden_combination(self, results: List[Dict]) -> None:
+        """
+        Hesaplar: Golden Score = (Norm_PnL * 0.4) + (Norm_PF * 0.3) + (Norm_Safety * 0.3)
+        
+        Zorunlu Filtreler:
+        - Likidasyon sayısı 0 olmalı
+        - Max Drawdown %30'u geçmemeli
+        - PnL pozitif olmalı
+        """
+        # 1. Filtreleme: Likidasyon olanları ve %30 üzeri DD yapanları ele
+        valid_candidates = [
+            r for r in results 
+            if r['liquidations'] == 0 and r['max_drawdown'] <= 30.0 and r['pnl_amount'] > 0
+        ]
+
+        if not valid_candidates:
+            print("\n⚠️ 'Golden Combination' bulunamadı (Tüm senaryolarda likidasyon veya yüksek risk var).")
+            return
+
+        # 2. Normalizasyon için uç değerleri bul
+        max_pnl = max(r['pnl_amount'] for r in valid_candidates)
+        max_pf = max(r['profit_factor'] for r in valid_candidates)
+        # Drawdown için 0'a bölme hatasını önlemek adına min 1.0 alıyoruz
+        min_dd = min(max(r['max_drawdown'], 1.0) for r in valid_candidates)
+
+        scored_results = []
+        
+        for res in valid_candidates:
+            # PnL Skoru (0-100): Ne kadar çok kazandırdı?
+            score_pnl = (res['pnl_amount'] / max_pnl) * 100
+            
+            # Profit Factor Skoru (0-100): Ne kadar verimli?
+            score_pf = (res['profit_factor'] / max_pf) * 100
+            
+            # Güvenlik Skoru (0-100): DD ne kadar düşükse o kadar iyi
+            # Formül: (En_Düşük_DD / Mevcut_DD) -> DD arttıkça skor düşer
+            current_dd = max(res['max_drawdown'], 1.0)
+            score_safety = (min_dd / current_dd) * 100
+            
+            # AĞIRLIKLI ORTALAMA (Golden Score)
+            # %40 Kâr + %30 Verim + %30 Güvenlik
+            golden_score = (score_pnl * 0.40) + (score_pf * 0.30) + (score_safety * 0.30)
+            
+            res['_golden_score'] = golden_score
+            scored_results.append(res)
+
+        # Skora göre sırala
+        best_combo = sorted(scored_results, key=lambda x: x['_golden_score'], reverse=True)[0]
+
+        # Çıktıyı Yazdır
+        print("\n" + "✨" * 30)
+        print(f"✨ GOLDEN COMBINATION (En Dengeli Seçim) ✨")
+        print("✨" * 30)
+        print(f"⚙️  Ayarlar: Risk %{best_combo['risk']} | Kaldıraç {best_combo['leverage']}x")
+        print("-" * 60)
+        print(f"🏆 Golden Score : {best_combo['_golden_score']:.1f} / 100")
+        print(f"💰 Net PnL      : ${best_combo['pnl_amount']:,.2f} (%{best_combo['pnl_percent']:.2f})")
+        print(f"🛡️  Max Drawdown : %{best_combo['max_drawdown']:.2f}")
+        print(f"⚖️  Profit Factor: {best_combo['profit_factor']:.2f}")
+        print(f"💀 Likidasyon   : {best_combo['liquidations']} (0 olması zorunludur)")
+        print("=" * 60)
+        print("💡 Neden bu? Bu kombinasyon, sermayenizi aşırı riske atmadan")
+        print("   (düşük DD) en yüksek verimi (PF) ve getiriyi (PnL) dengeler.")
+        print("=" * 60 + "\n")
     
     def _load_risk_ranges(self) -> List[float]:
         """Load risk ranges from .env or use defaults."""
