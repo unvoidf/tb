@@ -101,24 +101,42 @@ class OptimizationEngine:
                     'composite_score': composite_score
                 })
         
-        # Filter results to only configurations with sufficient data
-        MIN_TRADES = 5  # Minimum trades for statistical significance
-        valid_results = [r for r in results if r['trades'] >= MIN_TRADES]
+        # Filter results using dynamic threshold based on trade count distribution
+        all_trade_counts = [r['trades'] for r in results if r['trades'] > 0]
+        
+        if not all_trade_counts:
+            # No trades at all - use all results
+            valid_results = results
+            dynamic_threshold = 0
+        else:
+            # Calculate median (more robust to outliers than mean)
+            sorted_counts = sorted(all_trade_counts)
+            median_trades = sorted_counts[len(sorted_counts) // 2]
+            
+            # Dynamic threshold logic:
+            # - If median < 3: Use minimum 2-3 trades (low data scenario)
+            # - If median >= 3: Use configurations above median (high data scenario)
+            if median_trades < 3:
+                # Low data scenario: Minimum 2-3 trades
+                dynamic_threshold = max(2, int(median_trades))
+                valid_results = [r for r in results if r['trades'] >= dynamic_threshold]
+            else:
+                # High data scenario: Above median
+                dynamic_threshold = median_trades
+                valid_results = [r for r in results if r['trades'] > dynamic_threshold]
         
         if show_all_rankings and not silent:
-            self._show_all_rankings(valid_results, MIN_TRADES)
+            self._show_all_rankings(valid_results, dynamic_threshold)
         elif not silent:
-            self._show_default_rankings(valid_results, MIN_TRADES, top_n)
+            self._show_default_rankings(valid_results, dynamic_threshold, top_n)
             results = sorted(valid_results, key=lambda x: x['pnl_amount'], reverse=True)
         else:
             # Silent mode - filter and sort by PnL
-            MIN_TRADES = 5
-            valid_results = [r for r in results if r['trades'] >= MIN_TRADES]
             results = sorted(valid_results, key=lambda x: x['pnl_amount'], reverse=True)
         
         # Return best configuration
         if len(results) == 0:
-            # Fallback: no config with 5+ trades, use all results
+            # Fallback: no valid results found, use all results sorted by profit factor
             all_results = sorted(
                 results if 'results' in locals() else [],
                 key=lambda x: x.get('profit_factor', 0),
