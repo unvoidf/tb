@@ -5,6 +5,7 @@ IMMEDIATE, OPTIMAL ve CONSERVATIVE entry seviyelerini hesaplar.
 from typing import Dict, Optional, Tuple
 from analysis.fibonacci_calculator import FibonacciCalculator
 from strategy.position_calculator import PositionCalculator
+from config.constants import SL_MULTIPLIER
 from utils.logger import LoggerManager
 
 
@@ -182,11 +183,11 @@ class DynamicEntryCalculator:
         try:
             if atr is not None and timeframe is not None:
                 if direction == 'LONG':
-                    price = current_price - (atr * 2.0)
-                    form_str = f"Güncel Fiyat - 2 x ATR = {current_price:.6f} - 2 x {atr:.6f} = {price:.6f}"
+                    price = current_price - (atr * SL_MULTIPLIER)
+                    form_str = f"Güncel Fiyat - {SL_MULTIPLIER} x ATR = {current_price:.6f} - {SL_MULTIPLIER} x {atr:.6f} = {price:.6f}"
                 else:
-                    price = current_price + (atr * 2.0)
-                    form_str = f"Güncel Fiyat + 2 x ATR = {current_price:.6f} + 2 x {atr:.6f} = {price:.6f}"
+                    price = current_price + (atr * SL_MULTIPLIER)
+                    form_str = f"Güncel Fiyat + {SL_MULTIPLIER} x ATR = {current_price:.6f} + {SL_MULTIPLIER} x {atr:.6f} = {price:.6f}"
                 expectation = 'ATR bazlı güvenli seviye'
                 explanation_detail = f"ATR ({timeframe}) = {atr:.6f}, Formül: {form_str}"
             else:
@@ -218,12 +219,12 @@ class DynamicEntryCalculator:
                 # Fallback R/R
                 return 2.0 if direction == 'LONG' else 2.0
             
-            # Stop-loss: 2x ATR
+            # Stop-loss: SL_MULTIPLIER x ATR
             if direction == 'LONG':
-                stop_loss = entry_price - (2 * atr)
+                stop_loss = entry_price - (SL_MULTIPLIER * atr)
                 target = entry_price + (3 * atr)  # 1.5:1 R/R
             else:
-                stop_loss = entry_price + (2 * atr)
+                stop_loss = entry_price + (SL_MULTIPLIER * atr)
                 target = entry_price - (3 * atr)
             
             risk = abs(entry_price - stop_loss)

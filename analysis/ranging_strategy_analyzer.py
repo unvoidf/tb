@@ -9,6 +9,7 @@ from typing import Dict, Optional, Union, Tuple
 import pandas as pd
 
 from utils.logger import LoggerManager
+from config.constants import SL_MULTIPLIER
 
 
 @dataclass
@@ -370,7 +371,7 @@ class RangingStrategyAnalyzer:
         # Endüstri standardı: Volatilite bazlı stop (ATR Trailing Stop mantığı)
         
         # ATR Multiplier: Ranging piyasada gürültüden kaçmak için 1.5 - 2 ATR idealdir.
-        atr_sl_multiplier = 2.0 
+        atr_sl_multiplier = SL_MULTIPLIER 
         
         if atr:
             if direction == "LONG":

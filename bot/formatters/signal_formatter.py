@@ -5,6 +5,7 @@ Signal alert mesajı ve inline keyboard oluşturma.
 import time
 from typing import Dict, List, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from config.constants import SL_MULTIPLIER
 from bot.formatters.base_formatter import BaseFormatter
 
 
@@ -117,13 +118,13 @@ class SignalFormatter(BaseFormatter):
                     # TP1 ve SL seviyelerini kullan (gerçek R:R)
                     atr = entry_levels.get('atr')
                     if atr:
-                        # TP1 = 3x ATR (1.5R), SL = 2x ATR (TP1'in R/R = 1.5R)
+                        # TP1 = 3x ATR (1.5R), SL = SL_MULTIPLIER x ATR
                         if direction == 'LONG':
                             tp1_price = signal_price + (atr * 3)
-                            sl_price = signal_price - (atr * 2)
+                            sl_price = signal_price - (atr * SL_MULTIPLIER)
                         else:  # SHORT
                             tp1_price = signal_price - (atr * 3)
-                            sl_price = signal_price + (atr * 2)
+                            sl_price = signal_price + (atr * SL_MULTIPLIER)
                         
                         risk = abs(signal_price - sl_price)
                         reward = abs(tp1_price - signal_price)
@@ -240,9 +241,9 @@ class SignalFormatter(BaseFormatter):
                 else:
                     risk_dist = signal_price * 0.01
                 tps = []
-                # TP multipliers: [3, 5] -> TP1=1.5R, TP2=2.5R (SL=2x ATR bazlı)
+                # TP multipliers: [3, 5] -> TP1=1.5R, TP2=2.5R (SL=SL_MULTIPLIER x ATR bazlı)
                 # SL mesafesi (R/R hesaplaması için)
-                sl_distance = risk_dist * 2.0  # SL = 2x ATR
+                sl_distance = risk_dist * SL_MULTIPLIER  # SL = SL_MULTIPLIER x ATR
                 
                 tp_multipliers = [3, 5]
                 for idx, multiplier in enumerate(tp_multipliers, start=1):
@@ -325,8 +326,8 @@ class SignalFormatter(BaseFormatter):
             
             # Trend stratejisi için
             else:
-                # Dengeli yaklaşım: Tek SL (2x ATR)
-                sl_multiplier = 2.0
+                # Dengeli yaklaşım: Tek SL (SL_MULTIPLIER x ATR)
+                sl_multiplier = SL_MULTIPLIER
                 if atr:
                     offset = atr * sl_multiplier
                     if direction == 'LONG':

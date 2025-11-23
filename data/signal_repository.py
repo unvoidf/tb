@@ -95,45 +95,44 @@ class SignalRepository(BaseRepository):
             True ise başarılı
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            created_at = int(time.time())
-            # JSON serialization için dict'leri temizle (numpy/pandas bool'ları Python bool'a çevir)
-            signal_data_clean = self.clean_for_json(signal_data)
-            entry_levels_clean = self.clean_for_json(entry_levels)
-            signal_data_json = json.dumps(signal_data_clean)
-            entry_levels_json = json.dumps(entry_levels_clean)
-            
-            cursor.execute("""
-                INSERT INTO signals (
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                created_at = int(time.time())
+                # JSON serialization için dict'leri temizle (numpy/pandas bool'ları Python bool'a çevir)
+                signal_data_clean = self.clean_for_json(signal_data)
+                entry_levels_clean = self.clean_for_json(entry_levels)
+                signal_data_json = json.dumps(signal_data_clean)
+                entry_levels_json = json.dumps(entry_levels_clean)
+                
+                cursor.execute("""
+                    INSERT INTO signals (
+                        signal_id, symbol, direction, signal_price, confidence,
+                        atr, timeframe, telegram_message_id, telegram_channel_id,
+                        created_at, tp1_price, tp2_price, tp3_price,
+                        sl1_price, sl1_5_price, sl2_price,
+                        signal_data, entry_levels,
+                        signal_score_breakdown, market_context,
+                        tp1_distance_r, tp2_distance_r, tp3_distance_r,
+                        sl1_distance_r, sl2_distance_r,
+                        optimal_entry_price, conservative_entry_price
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
                     signal_id, symbol, direction, signal_price, confidence,
                     atr, timeframe, telegram_message_id, telegram_channel_id,
                     created_at, tp1_price, tp2_price, tp3_price,
                     sl1_price, sl1_5_price, sl2_price,
-                    signal_data, entry_levels,
+                    signal_data_json, entry_levels_json,
                     signal_score_breakdown, market_context,
                     tp1_distance_r, tp2_distance_r, tp3_distance_r,
                     sl1_distance_r, sl2_distance_r,
                     optimal_entry_price, conservative_entry_price
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                signal_id, symbol, direction, signal_price, confidence,
-                atr, timeframe, telegram_message_id, telegram_channel_id,
-                created_at, tp1_price, tp2_price, tp3_price,
-                sl1_price, sl1_5_price, sl2_price,
-                signal_data_json, entry_levels_json,
-                signal_score_breakdown, market_context,
-                tp1_distance_r, tp2_distance_r, tp3_distance_r,
-                sl1_distance_r, sl2_distance_r,
-                optimal_entry_price, conservative_entry_price
-            ))
-            
-            conn.commit()
-            conn.close()
-            
-            self.logger.info(f"Sinyal kaydedildi: {signal_id} - {symbol} {direction}")
-            return True
+                ))
+                
+                conn.commit()
+                
+                self.logger.info(f"Sinyal kaydedildi: {signal_id} - {symbol} {direction}")
+                return True
             
         except Exception as e:
             self.logger.error(f"Sinyal kaydetme hatası: {str(e)}", exc_info=True)
@@ -150,19 +149,18 @@ class SignalRepository(BaseRepository):
             Sinyal dict veya None
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT * FROM signals WHERE signal_id = ?
-            """, (signal_id,))
-            
-            row = cursor.fetchone()
-            conn.close()
-            
-            if row:
-                return self.row_to_dict(row)
-            return None
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT * FROM signals WHERE signal_id = ?
+                """, (signal_id,))
+                
+                row = cursor.fetchone()
+                
+                if row:
+                    return self.row_to_dict(row)
+                return None
             
         except Exception as e:
             self.logger.error(f"Sinyal getirme hatası: {str(e)}", exc_info=True)
@@ -177,43 +175,41 @@ class SignalRepository(BaseRepository):
             Aktif sinyal listesi
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            # 72 saat = 259200 saniye
-            hours_72_seconds = 72 * 3600
-            
-            # UTC timestamp al (sistem saatinden bağımsız)
-            current_time_utc = int(time.time())
-            threshold_time = current_time_utc - hours_72_seconds
-            
-            # 72 saatten yeni sinyaller (TP/SL durumundan bağımsız)
-            # Mesaj silinmemiş sinyaller (message_deleted = 0)
-            # Python'dan UTC timestamp kullanarak sistem saatinden bağımsız çalışır
-            cursor.execute("""
-                SELECT * FROM signals
-                WHERE created_at > ? AND (message_deleted = 0 OR message_deleted IS NULL)
-                ORDER BY created_at DESC
-            """, (threshold_time,))
-            
-            rows = cursor.fetchall()
-            active_count = len(rows)
-            
-            # 72 saatten eski sinyalleri say (logger için)
-            cursor.execute("""
-                SELECT COUNT(*) FROM signals
-                WHERE created_at <= ?
-            """, (threshold_time,))
-            expired_count = cursor.fetchone()[0]
-            
-            conn.close()
-            
-            # Logger mesajları
-            self.logger.debug(f"Aktif sinyal sorgusu: {active_count} aktif, {expired_count} eski (72 saatten eski, UTC timestamp: {current_time_utc})")
-            if expired_count > 0:
-                self.logger.info(f"{expired_count} sinyal 72 saatten eski olduğu için aktif listeden çıkarıldı")
-            
-            return [self.row_to_dict(row) for row in rows]
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                # 72 saat = 259200 saniye
+                hours_72_seconds = 72 * 3600
+                
+                # UTC timestamp al (sistem saatinden bağımsız)
+                current_time_utc = int(time.time())
+                threshold_time = current_time_utc - hours_72_seconds
+                
+                # 72 saatten yeni sinyaller (TP/SL durumundan bağımsız)
+                # Mesaj silinmemiş sinyaller (message_deleted = 0)
+                # Python'dan UTC timestamp kullanarak sistem saatinden bağımsız çalışır
+                cursor.execute("""
+                    SELECT * FROM signals
+                    WHERE created_at > ? AND (message_deleted = 0 OR message_deleted IS NULL)
+                    ORDER BY created_at DESC
+                """, (threshold_time,))
+                
+                rows = cursor.fetchall()
+                active_count = len(rows)
+                
+                # 72 saatten eski sinyalleri say (logger için)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM signals
+                    WHERE created_at <= ?
+                """, (threshold_time,))
+                expired_count = cursor.fetchone()[0]
+                
+                # Logger mesajları
+                self.logger.debug(f"Aktif sinyal sorgusu: {active_count} aktif, {expired_count} eski (72 saatten eski, UTC timestamp: {current_time_utc})")
+                if expired_count > 0:
+                    self.logger.info(f"{expired_count} sinyal 72 saatten eski olduğu için aktif listeden çıkarıldı")
+                
+                return [self.row_to_dict(row) for row in rows]
             
         except Exception as e:
             self.logger.error(f"Aktif sinyal getirme hatası: {str(e)}", exc_info=True)
@@ -222,41 +218,40 @@ class SignalRepository(BaseRepository):
     def get_last_signal_summary(self, symbol: str) -> Optional[Dict]:
         """Belirtilen sembol için en son aktif (mesajı silinmemiş) sinyalin özet bilgilerini döndürür."""
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
 
-            cursor.execute(
-                """
-                SELECT symbol, direction, confidence, created_at
-                FROM signals
-                WHERE symbol = ?
-                  AND (message_deleted = 0 OR message_deleted IS NULL)
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                (symbol,)
-            )
-
-            row = cursor.fetchone()
-            conn.close()
-
-            if row:
-                summary = {
-                    'symbol': row['symbol'],
-                    'direction': row['direction'],
-                    'confidence': row['confidence'],
-                    'created_at': row['created_at']
-                }
-                self.logger.debug(
-                    "Son sinyal özeti alındı: %s %s @ %s",
-                    summary['symbol'],
-                    summary['direction'],
-                    summary['created_at']
+                cursor.execute(
+                    """
+                    SELECT symbol, direction, confidence, created_at
+                    FROM signals
+                    WHERE symbol = ?
+                      AND (message_deleted = 0 OR message_deleted IS NULL)
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (symbol,)
                 )
-                return summary
 
-            self.logger.debug("%s için sinyal özeti bulunamadı", symbol)
-            return None
+                row = cursor.fetchone()
+
+                if row:
+                    summary = {
+                        'symbol': row['symbol'],
+                        'direction': row['direction'],
+                        'confidence': row['confidence'],
+                        'created_at': row['created_at']
+                    }
+                    self.logger.debug(
+                        "Son sinyal özeti alındı: %s %s @ %s",
+                        summary['symbol'],
+                        summary['direction'],
+                        summary['created_at']
+                    )
+                    return summary
+
+                self.logger.debug("%s için sinyal özeti bulunamadı", symbol)
+                return None
 
         except Exception as e:
             self.logger.error(f"Son sinyal özeti alma hatası: {str(e)}", exc_info=True)
@@ -272,45 +267,44 @@ class SignalRepository(BaseRepository):
 
         try:
             threshold = int(time.time()) - (lookback_hours * 3600)
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
 
-            cursor.execute(
-                """
-                SELECT symbol, direction, confidence, created_at
-                FROM signals
-                WHERE created_at >= ? 
-                  AND (message_deleted = 0 OR message_deleted IS NULL)
-                ORDER BY created_at DESC
-                """,
-                (threshold,)
-            )
+                cursor.execute(
+                    """
+                    SELECT symbol, direction, confidence, created_at
+                    FROM signals
+                    WHERE created_at >= ? 
+                      AND (message_deleted = 0 OR message_deleted IS NULL)
+                    ORDER BY created_at DESC
+                    """,
+                    (threshold,)
+                )
 
-            rows = cursor.fetchall()
-            conn.close()
+                rows = cursor.fetchall()
 
-            summaries: List[Dict] = []
-            processed_symbols = set()
+                summaries: List[Dict] = []
+                processed_symbols = set()
 
-            for row in rows:
-                symbol = row['symbol']
-                if symbol in processed_symbols:
-                    continue
+                for row in rows:
+                    symbol = row['symbol']
+                    if symbol in processed_symbols:
+                        continue
 
-                summaries.append({
-                    'symbol': symbol,
-                    'direction': row['direction'],
-                    'confidence': row['confidence'],
-                    'created_at': row['created_at']
-                })
-                processed_symbols.add(symbol)
+                    summaries.append({
+                        'symbol': symbol,
+                        'direction': row['direction'],
+                        'confidence': row['confidence'],
+                        'created_at': row['created_at']
+                    })
+                    processed_symbols.add(symbol)
 
-            self.logger.debug(
-                "Cache warmup için %d sembol bulundu (lookback=%dh)",
-                len(summaries),
-                lookback_hours
-            )
-            return summaries
+                self.logger.debug(
+                    "Cache warmup için %d sembol bulundu (lookback=%dh)",
+                    len(summaries),
+                    lookback_hours
+                )
+                return summaries
 
         except Exception as e:
             self.logger.error(f"Cache warmup verisi alma hatası: {str(e)}", exc_info=True)
@@ -337,42 +331,40 @@ class SignalRepository(BaseRepository):
             if hit_at is None:
                 hit_at = int(time.time())
             
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            if tp_level == 1:
-                cursor.execute("""
-                    UPDATE signals
-                    SET tp1_hit = 1, tp1_hit_at = ?
-                    WHERE signal_id = ? AND tp1_hit = 0
-                """, (hit_at, signal_id))
-            elif tp_level == 2:
-                cursor.execute("""
-                    UPDATE signals
-                    SET tp2_hit = 1, tp2_hit_at = ?
-                    WHERE signal_id = ? AND tp2_hit = 0
-                """, (hit_at, signal_id))
-            elif tp_level == 3:
-                cursor.execute("""
-                    UPDATE signals
-                    SET tp3_hit = 1, tp3_hit_at = ?
-                    WHERE signal_id = ? AND tp3_hit = 0
-                """, (hit_at, signal_id))
-            else:
-                self.logger.warning(f"Geçersiz TP level: {tp_level}")
-                conn.close()
-                return False
-            
-            conn.commit()
-            rows_affected = cursor.rowcount
-            conn.close()
-            
-            if rows_affected > 0:
-                self.logger.info(f"TP{tp_level} hit güncellendi: {signal_id}")
-                return True
-            else:
-                self.logger.debug(f"TP{tp_level} zaten hit veya sinyal bulunamadı: {signal_id}")
-                return False
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                if tp_level == 1:
+                    cursor.execute("""
+                        UPDATE signals
+                        SET tp1_hit = 1, tp1_hit_at = ?
+                        WHERE signal_id = ? AND tp1_hit = 0
+                    """, (hit_at, signal_id))
+                elif tp_level == 2:
+                    cursor.execute("""
+                        UPDATE signals
+                        SET tp2_hit = 1, tp2_hit_at = ?
+                        WHERE signal_id = ? AND tp2_hit = 0
+                    """, (hit_at, signal_id))
+                elif tp_level == 3:
+                    cursor.execute("""
+                        UPDATE signals
+                        SET tp3_hit = 1, tp3_hit_at = ?
+                        WHERE signal_id = ? AND tp3_hit = 0
+                    """, (hit_at, signal_id))
+                else:
+                    self.logger.warning(f"Geçersiz TP level: {tp_level}")
+                    return False
+                
+                conn.commit()
+                rows_affected = cursor.rowcount
+                
+                if rows_affected > 0:
+                    self.logger.info(f"TP{tp_level} hit güncellendi: {signal_id}")
+                    return True
+                else:
+                    self.logger.debug(f"TP{tp_level} zaten hit veya sinyal bulunamadı: {signal_id}")
+                    return False
             
         except Exception as e:
             self.logger.error(f"TP hit güncelleme hatası: {str(e)}", exc_info=True)
@@ -399,42 +391,40 @@ class SignalRepository(BaseRepository):
             if hit_at is None:
                 hit_at = int(time.time())
             
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            if sl_level == '1':
-                cursor.execute("""
-                    UPDATE signals
-                    SET sl1_hit = 1, sl1_hit_at = ?
-                    WHERE signal_id = ? AND sl1_hit = 0
-                """, (hit_at, signal_id))
-            elif sl_level == '1.5':
-                cursor.execute("""
-                    UPDATE signals
-                    SET sl1_5_hit = 1, sl1_5_hit_at = ?
-                    WHERE signal_id = ? AND sl1_5_hit = 0
-                """, (hit_at, signal_id))
-            elif sl_level == '2':
-                cursor.execute("""
-                    UPDATE signals
-                    SET sl2_hit = 1, sl2_hit_at = ?
-                    WHERE signal_id = ? AND sl2_hit = 0
-                """, (hit_at, signal_id))
-            else:
-                self.logger.warning(f"Geçersiz SL level: {sl_level}")
-                conn.close()
-                return False
-            
-            conn.commit()
-            rows_affected = cursor.rowcount
-            conn.close()
-            
-            if rows_affected > 0:
-                self.logger.info(f"SL{sl_level} hit güncellendi: {signal_id}")
-                return True
-            else:
-                self.logger.debug(f"SL{sl_level} zaten hit veya sinyal bulunamadı: {signal_id}")
-                return False
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                if sl_level == '1':
+                    cursor.execute("""
+                        UPDATE signals
+                        SET sl1_hit = 1, sl1_hit_at = ?
+                        WHERE signal_id = ? AND sl1_hit = 0
+                    """, (hit_at, signal_id))
+                elif sl_level == '1.5':
+                    cursor.execute("""
+                        UPDATE signals
+                        SET sl1_5_hit = 1, sl1_5_hit_at = ?
+                        WHERE signal_id = ? AND sl1_5_hit = 0
+                    """, (hit_at, signal_id))
+                elif sl_level == '2':
+                    cursor.execute("""
+                        UPDATE signals
+                        SET sl2_hit = 1, sl2_hit_at = ?
+                        WHERE signal_id = ? AND sl2_hit = 0
+                    """, (hit_at, signal_id))
+                else:
+                    self.logger.warning(f"Geçersiz SL level: {sl_level}")
+                    return False
+                
+                conn.commit()
+                rows_affected = cursor.rowcount
+                
+                if rows_affected > 0:
+                    self.logger.info(f"SL{sl_level} hit güncellendi: {signal_id}")
+                    return True
+                else:
+                    self.logger.debug(f"SL{sl_level} zaten hit veya sinyal bulunamadı: {signal_id}")
+                    return False
             
         except Exception as e:
             self.logger.error(f"SL hit güncelleme hatası: {str(e)}", exc_info=True)
@@ -452,25 +442,24 @@ class SignalRepository(BaseRepository):
             True ise başarılı
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE signals
-                SET message_deleted = 1
-                WHERE signal_id = ?
-            """, (signal_id,))
-            
-            conn.commit()
-            rows_affected = cursor.rowcount
-            conn.close()
-            
-            if rows_affected > 0:
-                self.logger.info(f"Sinyal mesajı silindi olarak işaretlendi: {signal_id}")
-                return True
-            else:
-                self.logger.warning(f"Sinyal bulunamadı (message_deleted): {signal_id}")
-                return False
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    UPDATE signals
+                    SET message_deleted = 1
+                    WHERE signal_id = ?
+                """, (signal_id,))
+                
+                conn.commit()
+                rows_affected = cursor.rowcount
+                
+                if rows_affected > 0:
+                    self.logger.info(f"Sinyal mesajı silindi olarak işaretlendi: {signal_id}")
+                    return True
+                else:
+                    self.logger.warning(f"Sinyal bulunamadı (message_deleted): {signal_id}")
+                    return False
                 
         except Exception as e:
             self.logger.error(f"Message deleted işaretleme hatası: {str(e)}", exc_info=True)
@@ -497,32 +486,31 @@ class SignalRepository(BaseRepository):
             current_time_utc = int(time.time())
             threshold_time = current_time_utc - hours_72_seconds
             
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT * FROM signals
-                WHERE symbol = ? 
-                  AND direction = ?
-                  AND created_at > ?
-                  AND (message_deleted = 0 OR message_deleted IS NULL)
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, (symbol, direction, threshold_time))
-            
-            row = cursor.fetchone()
-            conn.close()
-            
-            if row:
-                signal = self.row_to_dict(row)
-                self.logger.debug(
-                    "Aktif sinyal bulundu: %s %s @ %s (signal_id: %s)",
-                    symbol, direction, signal.get('created_at'), signal.get('signal_id')
-                )
-                return signal
-            
-            self.logger.debug("%s %s için aktif sinyal bulunamadı", symbol, direction)
-            return None
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT * FROM signals
+                    WHERE symbol = ? 
+                      AND direction = ?
+                      AND created_at > ?
+                      AND (message_deleted = 0 OR message_deleted IS NULL)
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (symbol, direction, threshold_time))
+                
+                row = cursor.fetchone()
+                
+                if row:
+                    signal = self.row_to_dict(row)
+                    self.logger.debug(
+                        "Aktif sinyal bulundu: %s %s @ %s (signal_id: %s)",
+                        symbol, direction, signal.get('created_at'), signal.get('signal_id')
+                    )
+                    return signal
+                
+                self.logger.debug("%s %s için aktif sinyal bulunamadı", symbol, direction)
+                return None
             
         except Exception as e:
             self.logger.error(
@@ -623,28 +611,30 @@ class SignalRepository(BaseRepository):
             # JSON'a çevir ve güncelle
             signal_log_json = json.dumps(signal_log)
             
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
+            # JSON'a çevir ve güncelle
+            signal_log_json = json.dumps(signal_log)
             
-            cursor.execute("""
-                UPDATE signals
-                SET signal_log = ?
-                WHERE signal_id = ?
-            """, (signal_log_json, signal_id))
-            
-            conn.commit()
-            rows_affected = cursor.rowcount
-            conn.close()
-            
-            if rows_affected > 0:
-                self.logger.info(
-                    f"Sinyal günlüğüne entry eklendi: {signal_id} - "
-                    f"price={price}, confidence={confidence:.3f}, change={confidence_change:+.3f}"
-                )
-                return True
-            else:
-                self.logger.warning(f"Sinyal güncellenemedi (log ekleme): {signal_id}")
-                return False
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    UPDATE signals
+                    SET signal_log = ?
+                    WHERE signal_id = ?
+                """, (signal_log_json, signal_id))
+                
+                conn.commit()
+                rows_affected = cursor.rowcount
+                
+                if rows_affected > 0:
+                    self.logger.info(
+                        f"Sinyal günlüğüne entry eklendi: {signal_id} - "
+                        f"price={price}, confidence={confidence:.3f}, change={confidence_change:+.3f}"
+                    )
+                    return True
+                else:
+                    self.logger.warning(f"Sinyal güncellenemedi (log ekleme): {signal_id}")
+                    return False
                 
         except Exception as e:
             self.logger.error(
@@ -712,17 +702,16 @@ class SignalRepository(BaseRepository):
             True ise başarılı
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE signals
-                SET mfe_price = ?, mfe_at = ?, mae_price = ?, mae_at = ?
-                WHERE signal_id = ?
-            """, (mfe_price, mfe_at, mae_price, mae_at, signal_id))
-            
-            conn.commit()
-            conn.close()
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    UPDATE signals
+                    SET mfe_price = ?, mfe_at = ?, mae_price = ?, mae_at = ?
+                    WHERE signal_id = ?
+                """, (mfe_price, mfe_at, mae_price, mae_at, signal_id))
+                
+                conn.commit()
             
             self.logger.debug(f"MFE/MAE güncellendi: {signal_id}")
             return True
@@ -749,27 +738,26 @@ class SignalRepository(BaseRepository):
             True ise başarılı
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            if entry_type == 'optimal':
-                cursor.execute("""
-                    UPDATE signals
-                    SET optimal_entry_hit = 1, optimal_entry_hit_at = ?
-                    WHERE signal_id = ?
-                """, (hit_at, signal_id))
-            elif entry_type == 'conservative':
-                cursor.execute("""
-                    UPDATE signals
-                    SET conservative_entry_hit = 1, conservative_entry_hit_at = ?
-                    WHERE signal_id = ?
-                """, (hit_at, signal_id))
-            else:
-                self.logger.warning(f"Geçersiz entry_type: {entry_type}")
-                return False
-            
-            conn.commit()
-            conn.close()
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                if entry_type == 'optimal':
+                    cursor.execute("""
+                        UPDATE signals
+                        SET optimal_entry_hit = 1, optimal_entry_hit_at = ?
+                        WHERE signal_id = ?
+                    """, (hit_at, signal_id))
+                elif entry_type == 'conservative':
+                    cursor.execute("""
+                        UPDATE signals
+                        SET conservative_entry_hit = 1, conservative_entry_hit_at = ?
+                        WHERE signal_id = ?
+                    """, (hit_at, signal_id))
+                else:
+                    self.logger.warning(f"Geçersiz entry_type: {entry_type}")
+                    return False
+                
+                conn.commit()
             
             self.logger.debug(f"Alternative entry hit: {signal_id} - {entry_type}")
             return True
@@ -797,17 +785,16 @@ class SignalRepository(BaseRepository):
             True ise başarılı
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE signals
-                SET final_price = ?, final_outcome = ?
-                WHERE signal_id = ?
-            """, (final_price, final_outcome, signal_id))
-            
-            conn.commit()
-            conn.close()
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    UPDATE signals
+                    SET final_price = ?, final_outcome = ?
+                    WHERE signal_id = ?
+                """, (final_price, final_outcome, signal_id))
+                
+                conn.commit()
             
             self.logger.info(f"Sinyal finalized: {signal_id} - {final_outcome} @ {final_price}")
             return True
@@ -836,16 +823,15 @@ class SignalRepository(BaseRepository):
             True ise başarılı
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                INSERT INTO signal_price_snapshots (signal_id, timestamp, price, source)
-                VALUES (?, ?, ?, ?)
-            """, (signal_id, timestamp, price, source))
-            
-            conn.commit()
-            conn.close()
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT INTO signal_price_snapshots (signal_id, timestamp, price, source)
+                    VALUES (?, ?, ?, ?)
+                """, (signal_id, timestamp, price, source))
+                
+                conn.commit()
             
             return True
             
@@ -879,21 +865,20 @@ class SignalRepository(BaseRepository):
             True ise başarılı
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            created_at = int(time.time())
-            
-            cursor.execute("""
-                INSERT INTO rejected_signals (
-                    symbol, direction, confidence, signal_price,
-                    created_at, rejection_reason, score_breakdown, market_context
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (symbol, direction, confidence, signal_price,
-                  created_at, rejection_reason, score_breakdown, market_context))
-            
-            conn.commit()
-            conn.close()
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                created_at = int(time.time())
+                
+                cursor.execute("""
+                    INSERT INTO rejected_signals (
+                        symbol, direction, confidence, signal_price,
+                        created_at, rejection_reason, score_breakdown, market_context
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (symbol, direction, confidence, signal_price,
+                      created_at, rejection_reason, score_breakdown, market_context))
+                
+                conn.commit()
             
             self.logger.debug(f"Rejected signal kaydedildi: {symbol} - {rejection_reason}")
             return True
@@ -913,17 +898,16 @@ class SignalRepository(BaseRepository):
             Snapshot listesi
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT * FROM signal_price_snapshots
-                WHERE signal_id = ?
-                ORDER BY timestamp
-            """, (signal_id,))
-            
-            rows = cursor.fetchall()
-            conn.close()
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT * FROM signal_price_snapshots
+                    WHERE signal_id = ?
+                    ORDER BY timestamp
+                """, (signal_id,))
+                
+                rows = cursor.fetchall()
             
             snapshots = [dict(row) for row in rows]
             return snapshots
@@ -950,38 +934,37 @@ class SignalRepository(BaseRepository):
             True ise başarılı
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                INSERT INTO signal_metrics_summary (
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT INTO signal_metrics_summary (
+                        period_start, period_end,
+                        total_signals, long_signals, short_signals, neutral_filtered,
+                        avg_confidence, tp1_hit_rate, tp2_hit_rate, tp3_hit_rate,
+                        sl1_hit_rate, sl2_hit_rate,
+                        avg_mfe_percent, avg_mae_percent,
+                        avg_time_to_first_target_hours, market_regime
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
                     period_start, period_end,
-                    total_signals, long_signals, short_signals, neutral_filtered,
-                    avg_confidence, tp1_hit_rate, tp2_hit_rate, tp3_hit_rate,
-                    sl1_hit_rate, sl2_hit_rate,
-                    avg_mfe_percent, avg_mae_percent,
-                    avg_time_to_first_target_hours, market_regime
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                period_start, period_end,
-                metrics.get('total_signals', 0),
-                metrics.get('long_signals', 0),
-                metrics.get('short_signals', 0),
-                metrics.get('neutral_filtered', 0),
-                metrics.get('avg_confidence', 0.0),
-                metrics.get('tp1_hit_rate', 0.0),
-                metrics.get('tp2_hit_rate', 0.0),
-                metrics.get('tp3_hit_rate', 0.0),
-                metrics.get('sl1_hit_rate', 0.0),
-                metrics.get('sl2_hit_rate', 0.0),
-                metrics.get('avg_mfe_percent', 0.0),
-                metrics.get('avg_mae_percent', 0.0),
-                metrics.get('avg_time_to_first_target_hours', 0.0),
-                metrics.get('market_regime', 'unknown')
-            ))
-            
-            conn.commit()
-            conn.close()
+                    metrics.get('total_signals', 0),
+                    metrics.get('long_signals', 0),
+                    metrics.get('short_signals', 0),
+                    metrics.get('neutral_filtered', 0),
+                    metrics.get('avg_confidence', 0.0),
+                    metrics.get('tp1_hit_rate', 0.0),
+                    metrics.get('tp2_hit_rate', 0.0),
+                    metrics.get('tp3_hit_rate', 0.0),
+                    metrics.get('sl1_hit_rate', 0.0),
+                    metrics.get('sl2_hit_rate', 0.0),
+                    metrics.get('avg_mfe_percent', 0.0),
+                    metrics.get('avg_mae_percent', 0.0),
+                    metrics.get('avg_time_to_first_target_hours', 0.0),
+                    metrics.get('market_regime', 'unknown')
+                ))
+                
+                conn.commit()
             
             self.logger.info(f"Metrics summary kaydedildi: {period_start} - {period_end}")
             return True
@@ -1002,17 +985,16 @@ class SignalRepository(BaseRepository):
             Sinyal listesi
         """
         try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT * FROM signals
-                WHERE created_at >= ? AND created_at <= ?
-                ORDER BY created_at
-            """, (start_ts, end_ts))
-            
-            rows = cursor.fetchall()
-            conn.close()
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT * FROM signals
+                    WHERE created_at >= ? AND created_at <= ?
+                    ORDER BY created_at
+                """, (start_ts, end_ts))
+                
+                rows = cursor.fetchall()
             
             signals = []
             for row in rows:

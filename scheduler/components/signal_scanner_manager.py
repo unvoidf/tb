@@ -7,6 +7,7 @@ import json
 from typing import Dict, List, Optional, Union, Tuple, Any
 from utils.logger import LoggerManager
 from data.coin_filter import CoinFilter
+from config.constants import SL_MULTIPLIER
 
 from strategy.dynamic_entry_calculator import DynamicEntryCalculator
 from bot.message_formatter import MessageFormatter
@@ -269,30 +270,11 @@ class SignalScannerManager:
                 return
             
             # VOLATİLİTE FİLTRESİ (Finans Uzmanı Önerisi)
-            # Aşırı volatil coinlerde sinyal gücünü düşür veya reddet
-            volatility_percentile = market_context.get('volatility_percentile', 50.0)
-            if volatility_percentile > 80:
-                # Yüksek volatilite: Confidence penalty uygula
-                volatility_penalty = 0.85  # %15 düşür
-                penalized_score = total_score * volatility_penalty
-                
-                # Penalty sonrası threshold altına düştüyse reddet
-                if penalized_score < self.confidence_threshold:
-                    self.logger.info(
-                        f"{symbol} sinyali reddedildi: Yüksek volatilite "
-                        f"(percentile={volatility_percentile:.1f}%). "
-                        f"Score: {total_score:.3f} -> {penalized_score:.3f} (penalty sonrası)"
-                    )
-                    if stats: stats['REJECTED_HIGH_VOLATILITY'] = stats.get('REJECTED_HIGH_VOLATILITY', 0) + 1
-                    return
-                else:
-                    # Penalty uygula ama sinyali kabul et
-                    total_score = penalized_score
-                    signal_data['confidence'] = min(total_score, 1.0)
-                    self.logger.info(
-                        f"{symbol} yüksek volatilite penalty uygulandı: "
-                        f"{volatility_percentile:.1f}% -> score {total_score:.3f}"
-                    )
+            # NOT: Volatilite cezası zaten adaptive_thresholds.py içinde uygulanıyor.
+            # Burada tekrar uygulamak "çift ceza" (double penalty) yaratıyor.
+            # Bu nedenle buradaki kod bloğu devre dışı bırakıldı.
+            # volatility_percentile = market_context.get('volatility_percentile', 50.0)
+            # if volatility_percentile > 80: ... (REMOVED)
             
             # RANGING PİYASA FİLTRESİ (Finans Uzmanı Önerisi)
             # Yatay piyasada sadece yüksek güvenli sinyaller geçsin
@@ -828,7 +810,7 @@ class SignalScannerManager:
         
         # SL seviyeleri (Tek SL: 2x ATR)
         # Dengeli yaklaşım: Sadece SL2 (2x ATR) kullanılır
-        sl_multiplier = 2.0
+        sl_multiplier = SL_MULTIPLIER
         if atr:
             offset = atr * sl_multiplier
             if direction == 'LONG':

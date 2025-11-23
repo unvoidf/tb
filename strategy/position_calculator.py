@@ -5,6 +5,7 @@ Fibonacci ve ATR bazlı giriş, stop-loss ve take-profit seviyeleri.
 import pandas as pd
 from typing import Dict, Optional
 from analysis.fibonacci_calculator import FibonacciCalculator
+from config.constants import SL_MULTIPLIER
 from utils.logger import LoggerManager
 
 
@@ -158,11 +159,11 @@ class PositionCalculator:
         Returns:
             Stop-loss seviyesi
         """
-        # ATR bazlı stop-loss (2x ATR)
+        # ATR bazlı stop-loss (SL_MULTIPLIER x ATR)
         if direction == 'LONG':
-            atr_sl = entry - (2 * atr)
+            atr_sl = entry - (SL_MULTIPLIER * atr)
         else:
-            atr_sl = entry + (2 * atr)
+            atr_sl = entry + (SL_MULTIPLIER * atr)
         
         # Fibonacci ve ATR'den daha sıkı olanı kullan
         if direction == 'LONG':
@@ -187,12 +188,12 @@ class PositionCalculator:
         entry = price
         
         if direction == 'LONG':
-            stop_loss = entry - (2 * atr)
+            stop_loss = entry - (SL_MULTIPLIER * atr)
             tp1 = entry + (2 * atr)
             tp2 = entry + (3.236 * atr)
             tp3 = entry + (5.236 * atr)
         else:
-            stop_loss = entry + (2 * atr)
+            stop_loss = entry + (SL_MULTIPLIER * atr)
             tp1 = entry - (2 * atr)
             tp2 = entry - (3.236 * atr)
             tp3 = entry - (5.236 * atr)
