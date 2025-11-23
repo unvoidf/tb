@@ -1,13 +1,13 @@
 """
-RiskManager: Risk yönetimi sınıfı.
-Leverage önerisi ve pozisyon büyüklüğü hesaplaması.
+RiskManager: Risk management class.
+Leverage suggestion and position size calculation.
 """
 from typing import Dict
 from utils.logger import LoggerManager
 
 
 class RiskManager:
-    """Risk yönetimi ve pozisyon büyüklüğü hesaplar."""
+    """Calculates risk management and position size."""
     
     def __init__(self,
                  risk_low: float = 0.01,
@@ -16,12 +16,12 @@ class RiskManager:
                  leverage_min: int = 1,
                  leverage_max: int = 10):
         """
-        RiskManager'ı başlatır.
+        Initializes RiskManager.
         
         Args:
-            risk_low: Düşük risk yüzdesi
-            risk_medium: Orta risk yüzdesi
-            risk_high: Yüksek risk yüzdesi
+            risk_low: Low risk percentage
+            risk_medium: Medium risk percentage
+            risk_high: High risk percentage
             leverage_min: Minimum leverage
             leverage_max: Maximum leverage
         """
@@ -38,23 +38,23 @@ class RiskManager:
         self, position_info: Dict, signal_confidence: float
     ) -> Dict:
         """
-        Pozisyon büyüklüğü ve leverage hesaplar.
+        Calculates position size and leverage.
         
         Args:
-            position_info: Pozisyon bilgileri
-            signal_confidence: Sinyal güvenilirliği (0-1)
+            position_info: Position information
+            signal_confidence: Signal confidence (0-1)
             
         Returns:
-            Position sizing bilgileri
+            Position sizing information
         """
-        # Risk seviyesini belirle
+        # Determine risk level
         risk_level = self._determine_risk_level(signal_confidence)
         self.logger.debug(
             f"determine_risk_level: confidence={signal_confidence:.3f} -> {risk_level}"
         )
         account_risk = self.risk_levels[risk_level]
         
-        # Leverage önerisi
+        # Leverage suggestion
         leverage = self._calculate_leverage(
             signal_confidence,
             position_info.get('risk_percent', 2.0)
@@ -63,7 +63,7 @@ class RiskManager:
             f"calculate_leverage: confidence={signal_confidence:.3f}, pos_risk={position_info.get('risk_percent', 2.0):.3f} -> leverage={leverage}"
         )
         
-        # Pozisyon büyüklüğü yüzdesi
+        # Position size percentage
         position_size_percent = self._calculate_position_percent(
             account_risk, position_info['risk_percent'], leverage
         )
@@ -81,13 +81,13 @@ class RiskManager:
     
     def _determine_risk_level(self, confidence: float) -> str:
         """
-        Güvenilirliğe göre risk seviyesi belirler.
+        Determines risk level based on confidence.
         
         Args:
-            confidence: Sinyal güvenilirliği
+            confidence: Signal confidence
             
         Returns:
-            'low', 'medium', veya 'high'
+            'low', 'medium', or 'high'
         """
         if confidence >= 0.75:
             return 'high'
@@ -100,19 +100,19 @@ class RiskManager:
         self, confidence: float, risk_percent: float
     ) -> int:
         """
-        Güvenilirlik ve volatiliteye göre leverage hesaplar.
+        Calculates leverage based on confidence and volatility.
         
         Args:
-            confidence: Sinyal güvenilirliği
-            risk_percent: Pozisyon risk yüzdesi
+            confidence: Signal confidence
+            risk_percent: Position risk percentage
             
         Returns:
-            Leverage değeri
+            Leverage value
         """
-        # Yüksek güvenilirlik -> yüksek leverage
+        # High confidence -> high leverage
         base_leverage = confidence * self.leverage_max
         
-        # Yüksek volatilite -> düşük leverage
+        # High volatility -> low leverage
         if risk_percent > 5.0:
             volatility_factor = 0.5
         elif risk_percent > 3.0:
@@ -122,7 +122,7 @@ class RiskManager:
         
         leverage = int(base_leverage * volatility_factor)
         
-        # Min-max aralığında tut
+        # Keep within min-max range
         leverage = max(self.leverage_min, min(self.leverage_max, leverage))
         
         return leverage
@@ -133,35 +133,35 @@ class RiskManager:
         leverage: int
     ) -> float:
         """
-        Pozisyon büyüklüğü yüzdesini hesaplar.
+        Calculates position size percentage.
         
         Args:
-            account_risk: Account risk yüzdesi (0.01 = %1)
-            position_risk: Pozisyon risk yüzdesi (%)
-            leverage: Kullanılacak leverage
+            account_risk: Account risk percentage (0.01 = 1%)
+            position_risk: Position risk percentage (%)
+            leverage: Leverage to use
             
         Returns:
-            Pozisyon büyüklüğü yüzdesi
+            Position size percentage
         """
         # Risk = (Position Size * Position Risk%) / Leverage
         # Position Size = (Account Risk * Leverage) / Position Risk%
         
         position_size = (account_risk * 100 * leverage) / position_risk
         
-        # Maksimum %100 ile sınırla (leverage ile)
+        # Limit to maximum 100% (with leverage)
         max_size = 100.0
         
         return min(position_size, max_size)
     
     def format_risk_advice(self, risk_info: Dict) -> str:
         """
-        Risk yönetimi tavsiyelerini Türkçe formatlar.
+        Formats risk management advice in Turkish.
         
         Args:
-            risk_info: Risk bilgileri
+            risk_info: Risk information
             
         Returns:
-            Formatlanmış tavsiye metni
+            Formatted advice text
         """
         risk_level_tr = {
             'low': 'Düşük',

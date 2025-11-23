@@ -1,5 +1,5 @@
 """
-RetryHandler: API çağrıları için exponential backoff retry mekanizması.
+RetryHandler: Exponential backoff retry mechanism for API calls.
 """
 import time
 from typing import Callable, Any, Type, Tuple
@@ -7,18 +7,18 @@ from functools import wraps
 
 
 class RetryHandler:
-    """API çağrıları için retry mekanizması sağlar."""
+    """Provides retry mechanism for API calls."""
     
     def __init__(self, max_attempts: int = 5, 
                  backoff_base: int = 2,
                  initial_delay: int = 1):
         """
-        RetryHandler'ı başlatır.
+        Initializes RetryHandler.
         
         Args:
-            max_attempts: Maksimum deneme sayısı
-            backoff_base: Exponential backoff base değeri
-            initial_delay: İlk deneme arası bekleme süresi (saniye)
+            max_attempts: Maximum number of attempts
+            backoff_base: Exponential backoff base value
+            initial_delay: Wait time before first retry (seconds)
         """
         self.max_attempts = max_attempts
         self.backoff_base = backoff_base
@@ -26,18 +26,18 @@ class RetryHandler:
     
     def execute(self, func: Callable, *args, **kwargs) -> Any:
         """
-        Fonksiyonu retry mekanizması ile çalıştırır.
+        Executes the function with retry mechanism.
         
         Args:
-            func: Çalıştırılacak fonksiyon
-            *args: Fonksiyon argümanları
-            **kwargs: Fonksiyon keyword argümanları
+            func: Function to execute
+            *args: Function arguments
+            **kwargs: Function keyword arguments
             
         Returns:
-            Fonksiyonun dönüş değeri
+            Function return value
             
         Raises:
-            Son denemede oluşan exception
+            Exception occurred in the last attempt
         """
         last_exception = None
         
@@ -57,13 +57,13 @@ class RetryHandler:
     
     def _calculate_delay(self, attempt: int) -> float:
         """
-        Exponential backoff delay hesaplar.
+        Calculates exponential backoff delay.
         
         Args:
-            attempt: Mevcut deneme sayısı
+            attempt: Current attempt number
             
         Returns:
-            Bekleme süresi (saniye)
+            Wait time (seconds)
         """
         return self.initial_delay * (self.backoff_base ** (attempt - 1))
     
@@ -73,16 +73,16 @@ class RetryHandler:
                    initial_delay: int = 1,
                    exceptions: Tuple[Type[Exception], ...] = (Exception,)):
         """
-        Decorator olarak retry mekanizması ekler.
+        Adds retry mechanism as a decorator.
         
         Args:
-            max_attempts: Maksimum deneme sayısı
+            max_attempts: Maximum number of attempts
             backoff_base: Exponential backoff base
-            initial_delay: İlk delay
-            exceptions: Yakalanacak exception türleri
+            initial_delay: Initial delay
+            exceptions: Exception types to catch
             
         Returns:
-            Decorated fonksiyon
+            Decorated function
         """
         def decorator(func: Callable) -> Callable:
             @wraps(func)
@@ -105,4 +105,3 @@ class RetryHandler:
             
             return wrapper
         return decorator
-

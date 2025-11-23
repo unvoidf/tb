@@ -1,7 +1,7 @@
 """
-LoggerManager: Merkezi log yönetim sistemi.
-Async logging + Rotating/TimedRotating file handler ile hem dosyaya hem console'a log yazan yapı.
-Kategorize edilmiş log dosyaları: signal_scanner.log, signal_tracker.log, trendbot.log
+LoggerManager: Central log management system.
+Structure that writes logs to both file and console with Async logging + Rotating/TimedRotating file handler.
+Categorized log files: signal_scanner.log, signal_tracker.log, trendbot.log
 """
 import logging
 import os
@@ -12,20 +12,20 @@ from typing import Optional, List
 
 
 class LoggerNameFilter(logging.Filter):
-    """Logger name'lerine göre filtreleme yapar."""
+    """Filters based on logger names."""
     
     def __init__(self, allowed_names: list):
         """
         Args:
-            allowed_names: İzin verilen logger name'leri (veya prefix'leri)
+            allowed_names: Allowed logger names (or prefixes)
         """
         super().__init__()
         self.allowed_names = allowed_names
     
     def filter(self, record: logging.LogRecord) -> bool:
-        """Logger name'i kontrol eder."""
+        """Checks the logger name."""
         logger_name = record.name
-        # Tam eşleşme veya prefix kontrolü
+        # Exact match or prefix check
         for allowed in self.allowed_names:
             if logger_name == allowed or logger_name.startswith(allowed + '.'):
                 return True
@@ -33,20 +33,20 @@ class LoggerNameFilter(logging.Filter):
 
 
 class ExcludeLoggerNameFilter(logging.Filter):
-    """Belirli logger name'lerini hariç tutar (exclude filter)."""
+    """Excludes specific logger names (exclude filter)."""
     
     def __init__(self, excluded_names: list):
         """
         Args:
-            excluded_names: Hariç tutulacak logger name'leri (veya prefix'leri)
+            excluded_names: Logger names to exclude (or prefixes)
         """
         super().__init__()
         self.excluded_names = excluded_names
     
     def filter(self, record: logging.LogRecord) -> bool:
-        """Logger name'i kontrol eder - excluded name'ler False döner."""
+        """Checks the logger name - excluded names return False."""
         logger_name = record.name
-        # Excluded name'lerden biriyle eşleşirse False döndür (hariç tut)
+        # If matches one of the excluded names, return False (exclude)
         for excluded in self.excluded_names:
             if logger_name == excluded or logger_name.startswith(excluded + '.'):
                 return False
@@ -54,13 +54,13 @@ class ExcludeLoggerNameFilter(logging.Filter):
 
 
 class LoggerManager:
-    """Uygulama genelinde log yönetimi sağlar."""
+    """Provides application-wide log management."""
     
     _instance: Optional['LoggerManager'] = None
     _initialized: bool = False
     
     def __new__(cls, *args, **kwargs):
-        """Singleton pattern implementasyonu."""
+        """Singleton pattern implementation."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -73,21 +73,21 @@ class LoggerManager:
                  rotation_when: Optional[str] = None,
                  rotation_interval: Optional[int] = None):
         """
-        LoggerManager'ı başlatır.
+        Initializes LoggerManager.
         
         Args:
-            log_dir: Log dosyalarının kaydedileceği dizin
-            max_bytes: Her log dosyasının maksimum boyutu (default: .env'den okunur veya 1MB)
-            backup_count: Saklanacak backup log sayısı (default: .env'den okunur veya 5)
-            async_enabled: Async logging aktif mi? (default: .env'den okunur veya True)
-            rotation_type: Rotation tipi: 'size', 'time', 'both' (default: .env'den okunur veya 'both')
-            rotation_when: Zaman bazlı rotation: 'midnight', 'H', 'D', 'W' (default: .env'den okunur veya 'midnight')
-            rotation_interval: Zaman bazlı rotation interval (default: .env'den okunur veya 1)
+            log_dir: Directory where log files will be saved
+            max_bytes: Maximum size of each log file (default: read from .env or 1MB)
+            backup_count: Number of backup logs to keep (default: read from .env or 5)
+            async_enabled: Is async logging enabled? (default: read from .env or True)
+            rotation_type: Rotation type: 'size', 'time', 'both' (default: read from .env or 'both')
+            rotation_when: Time-based rotation: 'midnight', 'H', 'D', 'W' (default: read from .env or 'midnight')
+            rotation_interval: Time-based rotation interval (default: read from .env or 1)
         """
         if self._initialized:
             return
         
-        # .env'den log ayarlarını oku
+        # Read log settings from .env
         self.log_dir = log_dir or os.getenv('LOG_DIR', 'logs')
         
         if max_bytes is None:
@@ -108,7 +108,7 @@ class LoggerManager:
         else:
             self.backup_count = backup_count
         
-        # Async logging ayarı
+        # Async logging setting
         if async_enabled is None:
             async_str = os.getenv('LOG_ASYNC_ENABLED', 'true').lower()
             self.async_enabled = async_str in ('true', '1', 'yes')
@@ -123,7 +123,7 @@ class LoggerManager:
         else:
             self.rotation_type = rotation_type
         
-        # Time rotation ayarları
+        # Time rotation settings
         if rotation_when is None:
             self.rotation_when = os.getenv('LOG_ROTATION_WHEN', 'midnight').lower()
         else:
@@ -138,16 +138,16 @@ class LoggerManager:
         else:
             self.rotation_interval = rotation_interval
         
-        # Async logging için queue ve listener
+        # Queue and listener for async logging
         self._log_queue = None
         self._queue_listener = None
         
         self._setup_log_directory()
-        # Önce tüm handler'ları topla, sonra logger'ı kur
+        # Collect all handlers first, then setup logger
         all_real_handlers = []
         self._setup_logger(all_real_handlers)
         self._setup_categorized_loggers(all_real_handlers)
-        # Async logging için QueueListener'ı tüm handler'larla oluştur
+        # Create QueueListener with all handlers for async logging
         if self.async_enabled and self._log_queue:
             if self._queue_listener:
                 self._queue_listener.stop()
@@ -156,20 +156,20 @@ class LoggerManager:
         self._initialized = True
     
     def _setup_log_directory(self) -> None:
-        """Log dizinini oluşturur."""
+        """Creates the log directory."""
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
     
     def _create_file_handlers(self, log_file: str, level: int) -> List[logging.Handler]:
         """
-        Dosya handler'ları oluşturur (rotation type'a göre).
+        Creates file handlers (based on rotation type).
         
         Args:
-            log_file: Log dosya yolu
-            level: Log seviyesi
+            log_file: Log file path
+            level: Log level
             
         Returns:
-            Handler instance'ları listesi (boş olabilir)
+            List of Handler instances (can be empty)
         """
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -196,10 +196,10 @@ class LoggerManager:
         # Time-based rotation (TimedRotatingFileHandler)
         if self.rotation_type in ('time', 'both'):
             try:
-                # "both" modunda time rotation için farklı dosya kullan (duplicate önlemek için)
-                # "time" modunda aynı dosyayı kullan
+                # Use different file for time rotation in "both" mode (to prevent duplicates)
+                # Use same file in "time" mode
                 if self.rotation_type == 'both':
-                    # Time rotation için ayrı dosya: trendbot.log -> trendbot_time.log
+                    # Separate file for time rotation: trendbot.log -> trendbot_time.log
                     time_log_file = log_file.replace('.log', '_time.log')
                 else:
                     time_log_file = log_file
@@ -217,7 +217,7 @@ class LoggerManager:
             except Exception:
                 pass
         
-        # Eğer handler yoksa, fallback handler oluştur
+        # If no handler, create fallback handler
         if not handlers:
             try:
                 fallback_handler = RotatingFileHandler(
@@ -236,26 +236,26 @@ class LoggerManager:
     
     def _setup_logger(self, real_handlers: List[logging.Handler]) -> None:
         """
-        Ana logger'ı yapılandırır.
+        Configures the main logger.
         
         Args:
-            real_handlers: Handler'ların ekleneceği liste (async için)
+            real_handlers: List to add handlers to (for async)
         """
         self.logger = logging.getLogger('TrendBot')
         
-        # DEBUG env variable kontrolü (öncelikli)
+        # DEBUG env variable check (priority)
         # DEBUG=1 → LOG_LEVEL=DEBUG, DEBUG=0 → LOG_LEVEL=INFO
         debug_env = os.getenv('DEBUG', '0').strip()
         if debug_env == '1':
             level = logging.DEBUG
         else:
-            # LOG_LEVEL env ile override edilebilir (DEBUG, INFO, WARNING, ERROR)
+            # Can be overridden with LOG_LEVEL env (DEBUG, INFO, WARNING, ERROR)
             level_name = os.getenv('LOG_LEVEL', 'INFO').upper()
             level = getattr(logging, level_name, logging.INFO)
         
         self.logger.setLevel(level)
         
-        # Önceki handler'ları temizle
+        # Clear previous handlers
         if self.logger.handlers:
             self.logger.handlers.clear()
         
@@ -265,11 +265,11 @@ class LoggerManager:
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         
-        # File Handler(s) - rotation type'a göre birden fazla olabilir
+        # File Handler(s) - can be multiple based on rotation type
         log_file = os.path.join(self.log_dir, 'trendbot.log')
         file_handlers = self._create_file_handlers(log_file, level)
-        # trendbot.log handler'ına exclude filter ekle (kategorize edilmiş logları hariç tut)
-        # Böylece duplicate loglar önlenir
+        # Add exclude filter to trendbot.log handler (exclude categorized logs)
+        # This prevents duplicate logs
         exclude_filter = ExcludeLoggerNameFilter([
             'TrendBot.SignalScannerManager',
             'TrendBot.SignalGenerator',
@@ -286,35 +286,35 @@ class LoggerManager:
             handler.addFilter(exclude_filter)
         real_handlers.extend(file_handlers)
         
-        # Console Handler (her zaman senkron)
+        # Console Handler (always synchronous)
         console_handler = logging.StreamHandler()
         console_handler.setLevel(level)
         console_handler.setFormatter(formatter)
         real_handlers.append(console_handler)
         
-        # Async logging aktifse QueueHandler kullan
+        # Use QueueHandler if async logging is enabled
         if self.async_enabled:
-            # Queue oluştur
+            # Create Queue
             self._log_queue = queue.Queue(-1)  # Unlimited queue
             
-            # QueueHandler oluştur (logger'a eklenir)
+            # Create QueueHandler (added to logger)
             queue_handler = QueueHandler(self._log_queue)
             queue_handler.setLevel(level)
             self.logger.addHandler(queue_handler)
-            # QueueListener daha sonra tüm handler'larla oluşturulacak
+            # QueueListener will be created later with all handlers
         else:
-            # Senkron: handler'ları direkt ekle
+            # Synchronous: add handlers directly
             for handler in real_handlers:
                 self.logger.addHandler(handler)
     
     def _setup_categorized_loggers(self, real_handlers: List[logging.Handler]) -> None:
         """
-        Kategorize edilmiş logger'ları yapılandırır.
+        Configures categorized loggers.
         
         Args:
-            real_handlers: Handler'ların ekleneceği liste (async için)
+            real_handlers: List to add handlers to (for async)
         """
-        # Log seviyesi
+        # Log level
         debug_env = os.getenv('DEBUG', '0').strip()
         if debug_env == '1':
             level = logging.DEBUG
@@ -322,13 +322,13 @@ class LoggerManager:
             level_name = os.getenv('LOG_LEVEL', 'INFO').upper()
             level = getattr(logging, level_name, logging.INFO)
         
-        # Ana logger'ı al (tüm loglar buraya gider)
+        # Get root logger (all logs go here)
         root_logger = logging.getLogger('TrendBot')
         
-        # 1. Signal Scanner Logger (Sinyal tarama ve üretme)
+        # 1. Signal Scanner Logger (Signal scanning and generation)
         scanner_file = os.path.join(self.log_dir, 'signal_scanner.log')
         scanner_handlers = self._create_file_handlers(scanner_file, level)
-        # Sadece sinyal tarama ile ilgili logger'ları filtrele
+        # Filter only signal scanning related loggers
         scanner_filter = LoggerNameFilter([
             'TrendBot.SignalScannerManager',
             'TrendBot.SignalGenerator',
@@ -338,32 +338,32 @@ class LoggerManager:
             'TrendBot.TechnicalIndicatorCalculator',
             'TrendBot.VolumeAnalyzer',
             'TrendBot.MarketAnalyzer',
-            'TrendBot.LiquidationSafetyFilter'  # Liquidation risk analizi de buraya
+            'TrendBot.LiquidationSafetyFilter'  # Liquidation risk analysis here too
         ])
         for handler in scanner_handlers:
             handler.addFilter(scanner_filter)
             real_handlers.append(handler)
         
-        # 2. Signal Tracker Logger (TP/SL takip)
+        # 2. Signal Tracker Logger (TP/SL tracking)
         tracker_file = os.path.join(self.log_dir, 'signal_tracker.log')
         tracker_handlers = self._create_file_handlers(tracker_file, level)
-        # Sadece TP/SL takip ile ilgili logger'ları filtrele
+        # Filter only TP/SL tracking related loggers
         tracker_filter = LoggerNameFilter(['TrendBot.SignalTracker'])
         for handler in tracker_handlers:
             handler.addFilter(tracker_filter)
             real_handlers.append(handler)
         
-        # Senkron modda handler'ları direkt ekle
+        # In synchronous mode, add handlers directly
         if not self.async_enabled:
             for handler in real_handlers:
                 root_logger.addHandler(handler)
     
     def get_logger(self, name: Optional[str] = None) -> logging.Logger:
         """
-        Logger instance döndürür.
+        Returns logger instance.
         
         Args:
-            name: Logger adı (opsiyonel)
+            name: Logger name (optional)
             
         Returns:
             Logger instance
@@ -373,33 +373,32 @@ class LoggerManager:
         return self.logger
     
     def shutdown(self) -> None:
-        """Logger'ı kapatır ve kaynakları temizler."""
+        """Closes the logger and cleans up resources."""
         if self._queue_listener:
             self._queue_listener.stop()
             self._queue_listener = None
         
-        # Tüm handler'ları kapat
+        # Close all handlers
         for handler in self.logger.handlers[:]:
             handler.close()
             self.logger.removeHandler(handler)
     
     def info(self, message: str) -> None:
-        """Info seviyesinde log kaydı."""
+        """Log record at Info level."""
         self.logger.info(message)
     
     def warning(self, message: str) -> None:
-        """Warning seviyesinde log kaydı."""
+        """Log record at Warning level."""
         self.logger.warning(message)
     
     def error(self, message: str, exc_info: bool = False) -> None:
-        """Error seviyesinde log kaydı."""
+        """Log record at Error level."""
         self.logger.error(message, exc_info=exc_info)
     
     def debug(self, message: str) -> None:
-        """Debug seviyesinde log kaydı."""
+        """Log record at Debug level."""
         self.logger.debug(message)
     
     def critical(self, message: str, exc_info: bool = False) -> None:
-        """Critical seviyesinde log kaydı."""
+        """Log record at Critical level."""
         self.logger.critical(message, exc_info=exc_info)
-

@@ -1,6 +1,6 @@
 """
 ServiceContainer: Dependency injection container.
-Servisleri yönetir ve bağımlılıkları çözer.
+Manages services and resolves dependencies.
 """
 from typing import Dict, Type, Any, Callable, Optional
 from utils.logger import LoggerManager
@@ -10,7 +10,7 @@ class ServiceContainer:
     """Dependency injection container."""
     
     def __init__(self):
-        """ServiceContainer'ı başlatır."""
+        """Initializes ServiceContainer."""
         self._services: Dict[Type, Any] = {}
         self._factories: Dict[Type, Callable] = {}
         self._singletons: Dict[Type, Any] = {}
@@ -18,59 +18,59 @@ class ServiceContainer:
     
     def register_singleton(self, service_type: Type, instance: Any) -> None:
         """
-        Singleton servis kaydeder.
+        Registers a singleton service.
         
         Args:
-            service_type: Servis tipi
-            instance: Servis instance'ı
+            service_type: Service type
+            instance: Service instance
         """
         self._singletons[service_type] = instance
         self.logger.debug(f"Singleton registered: {service_type.__name__}")
     
     def register_factory(self, service_type: Type, factory: Callable) -> None:
         """
-        Factory servis kaydeder.
+        Registers a factory service.
         
         Args:
-            service_type: Servis tipi
-            factory: Factory fonksiyonu
+            service_type: Service type
+            factory: Factory function
         """
         self._factories[service_type] = factory
         self.logger.debug(f"Factory registered: {service_type.__name__}")
     
     def register_instance(self, service_type: Type, instance: Any) -> None:
         """
-        Instance servis kaydeder.
+        Registers an instance service.
         
         Args:
-            service_type: Servis tipi
-            instance: Servis instance'ı
+            service_type: Service type
+            instance: Service instance
         """
         self._services[service_type] = instance
         self.logger.debug(f"Instance registered: {service_type.__name__}")
     
     def get(self, service_type: Type) -> Any:
         """
-        Servis instance'ını döndürür.
+        Returns service instance.
         
         Args:
-            service_type: Servis tipi
+            service_type: Service type
             
         Returns:
-            Servis instance'ı
+            Service instance
             
         Raises:
-            ValueError: Servis bulunamadığında
+            ValueError: When service is not found
         """
-        # Singleton kontrolü
+        # Singleton check
         if service_type in self._singletons:
             return self._singletons[service_type]
         
-        # Instance kontrolü
+        # Instance check
         if service_type in self._services:
             return self._services[service_type]
         
-        # Factory kontrolü
+        # Factory check
         if service_type in self._factories:
             instance = self._factories[service_type]()
             self.logger.debug(f"Factory created: {service_type.__name__}")
@@ -80,13 +80,13 @@ class ServiceContainer:
     
     def get_optional(self, service_type: Type) -> Optional[Any]:
         """
-        Opsiyonel servis instance'ını döndürür.
+        Returns optional service instance.
         
         Args:
-            service_type: Servis tipi
+            service_type: Service type
             
         Returns:
-            Servis instance'ı veya None
+            Service instance or None
         """
         try:
             return self.get(service_type)
@@ -95,20 +95,20 @@ class ServiceContainer:
     
     def is_registered(self, service_type: Type) -> bool:
         """
-        Servisin kayıtlı olup olmadığını kontrol eder.
+        Checks if service is registered.
         
         Args:
-            service_type: Servis tipi
+            service_type: Service type
             
         Returns:
-            Kayıtlı mı
+            Whether registered
         """
         return (service_type in self._services or 
                 service_type in self._factories or 
                 service_type in self._singletons)
     
     def clear(self) -> None:
-        """Tüm servisleri temizler."""
+        """Clears all services."""
         self._services.clear()
         self._factories.clear()
         self._singletons.clear()

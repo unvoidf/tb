@@ -1,16 +1,16 @@
 """
-RiskRewardCalculator: R-based distance hesaplama utility.
-TP/SL seviyelerini risk birimi (R) cinsinden hesaplar.
+RiskRewardCalculator: R-based distance calculation utility.
+Calculates TP/SL levels in terms of risk unit (R).
 """
 from typing import Dict, Optional
 from utils.logger import LoggerManager
 
 
 class RiskRewardCalculator:
-    """R-based risk/reward hesaplayıcı."""
+    """R-based risk/reward calculator."""
     
     def __init__(self):
-        """RiskRewardCalculator'ı başlatır."""
+        """Initializes RiskRewardCalculator."""
         self.logger = LoggerManager().get_logger('RiskRewardCalculator')
     
     def calculate_r_distances(
@@ -24,14 +24,14 @@ class RiskRewardCalculator:
         sl2: Optional[float]
     ) -> Dict[str, Optional[float]]:
         """
-        TP/SL seviyelerini R cinsinden hesaplar.
+        Calculates TP/SL levels in terms of R.
         R = |signal_price - sl2_price|
         
         Args:
-            signal_price: Sinyal fiyatı
+            signal_price: Signal price
             direction: LONG/SHORT
-            tp1, tp2, tp3: TP seviyeleri
-            sl1, sl2: SL seviyeleri
+            tp1, tp2, tp3: TP levels
+            sl1, sl2: SL levels
             
         Returns:
             {
@@ -39,11 +39,11 @@ class RiskRewardCalculator:
                 'tp2_distance_r': float,
                 'tp3_distance_r': float,
                 'sl1_distance_r': float,
-                'sl2_distance_r': float (her zaman -1.0)
+                'sl2_distance_r': float (always -1.0)
             }
         """
         if sl2 is None:
-            self.logger.debug("SL2 None, R distance hesaplanamıyor")
+            self.logger.debug("SL2 None, cannot calculate R distance")
             return {
                 'tp1_distance_r': None,
                 'tp2_distance_r': None,
@@ -54,7 +54,7 @@ class RiskRewardCalculator:
         
         r = abs(signal_price - sl2)
         if r == 0:
-            self.logger.warning("R = 0, distance hesaplanamıyor")
+            self.logger.warning("R = 0, cannot calculate distance")
             return {
                 'tp1_distance_r': None,
                 'tp2_distance_r': None,
@@ -64,26 +64,26 @@ class RiskRewardCalculator:
             }
         
         def calc_r(price, is_tp):
-            """Tek bir seviye için R distance hesapla."""
+            """Calculate R distance for a single level."""
             if price is None:
                 return None
             if direction == 'LONG':
                 if is_tp:
-                    return (price - signal_price) / r  # TP: pozitif (yukarı)
+                    return (price - signal_price) / r  # TP: positive (up)
                 else:
-                    return -(signal_price - price) / r  # SL: negatif (aşağı)
+                    return -(signal_price - price) / r  # SL: negative (down)
             else:  # SHORT
                 if is_tp:
-                    return (signal_price - price) / r  # TP: pozitif (aşağı)
+                    return (signal_price - price) / r  # TP: positive (down)
                 else:
-                    return -(price - signal_price) / r  # SL: negatif (yukarı)
+                    return -(price - signal_price) / r  # SL: negative (up)
         
         result = {
             'tp1_distance_r': calc_r(tp1, True),
             'tp2_distance_r': calc_r(tp2, True),
             'tp3_distance_r': calc_r(tp3, True),
             'sl1_distance_r': calc_r(sl1, False),
-            'sl2_distance_r': -1.0  # SL2 her zaman -1R (tanım gereği)
+            'sl2_distance_r': -1.0  # SL2 always -1R (by definition)
         }
 
         def _format_r(value: Optional[float]) -> str:

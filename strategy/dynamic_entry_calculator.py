@@ -1,6 +1,6 @@
 """
-DynamicEntryCalculator: Üç seviye giriş hesaplayan sınıf.
-IMMEDIATE, OPTIMAL ve CONSERVATIVE entry seviyelerini hesaplar.
+DynamicEntryCalculator: Class calculating three levels of entry.
+Calculates IMMEDIATE, OPTIMAL and CONSERVATIVE entry levels.
 """
 from typing import Dict, Optional, Tuple
 from analysis.fibonacci_calculator import FibonacciCalculator
@@ -10,15 +10,15 @@ from utils.logger import LoggerManager
 
 
 class DynamicEntryCalculator:
-    """Dinamik giriş seviyelerini hesaplar."""
+    """Calculates dynamic entry levels."""
     
     def __init__(self, fib_calculator: FibonacciCalculator, position_calc: PositionCalculator):
         """
-        DynamicEntryCalculator'ı başlatır.
+        Initializes DynamicEntryCalculator.
         
         Args:
-            fib_calculator: Fibonacci hesaplayıcı
-            position_calc: Pozisyon hesaplayıcı
+            fib_calculator: Fibonacci calculator
+            position_calc: Position calculator
         """
         self.fib_calc = fib_calculator
         self.position_calc = position_calc
@@ -34,14 +34,14 @@ class DynamicEntryCalculator:
         timeframe: Optional[str] = None
     ) -> Dict[str, Dict]:
         """
-        Üç seviye giriş hesaplar.
+        Calculates three levels of entry.
         
         Args:
-            symbol: Trading pair (örn: BTC/USDT)
+            symbol: Trading pair (e.g. BTC/USDT)
             direction: LONG/SHORT
-            current_price: Mevcut fiyat
-            df: OHLCV DataFrame (opsiyonel)
-            atr: ATR değeri (opsiyonel)
+            current_price: Current price
+            df: OHLCV DataFrame (optional)
+            atr: ATR value (optional)
             
         Returns:
             Entry levels dict
@@ -49,20 +49,20 @@ class DynamicEntryCalculator:
         try:
             self.logger.debug(f"calculate_entry_levels: {symbol} {direction} @ {current_price}")
             
-            # IMMEDIATE entry (mevcut fiyat)
+            # IMMEDIATE entry (current price)
             immediate_entry = self._calculate_immediate_entry(current_price, direction, timeframe, atr)
             
-            # OPTIMAL entry (ATR öncelikli, uygun ise Fib 0.618 ile zenginleştir)
+            # OPTIMAL entry (ATR priority, enrich with Fib 0.618 if suitable)
             optimal_entry = self._calculate_optimal_entry(
                 symbol, direction, current_price, df, atr, timeframe
             )
             
-            # CONSERVATIVE entry (ATR tabanlı güvenli seviye)
+            # CONSERVATIVE entry (ATR based safe level)
             conservative_entry = self._calculate_conservative_entry(
                 symbol, direction, current_price, df, atr, timeframe
             )
             
-            # Risk/Reward hesaplamaları
+            # Risk/Reward calculations
             immediate_rr = self._calculate_risk_reward(immediate_entry, direction, atr)
             optimal_rr = self._calculate_risk_reward(optimal_entry, direction, atr)
             conservative_rr = self._calculate_risk_reward(conservative_entry, direction, atr)
@@ -97,25 +97,25 @@ class DynamicEntryCalculator:
             }
             
         except Exception as e:
-            self.logger.error(f"Entry levels hesaplama hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Entry levels calculation error: {str(e)}", exc_info=True)
             return self._get_fallback_entry_levels(current_price, direction)
     
     def _calculate_immediate_entry(self, current_price: float, direction: str, timeframe: str = None, atr: float = None) -> Dict:
-        """Hemen giriş seviyesi."""
+        """Immediate entry level."""
         if direction == 'LONG':
             price = current_price * 1.001  # %0.1 spread
-            math_exp = f"Güncel Fiyat + %0.1 = {current_price:.6f} x 1.001 = {price:.6f}"
+            math_exp = f"Current Price + 0.1% = {current_price:.6f} x 1.001 = {price:.6f}"
         else:
             price = current_price * 0.999
-            math_exp = f"Güncel Fiyat - %0.1 = {current_price:.6f} x 0.999 = {price:.6f}"
-        expectation = 'Hızlı hareket'
+            math_exp = f"Current Price - 0.1% = {current_price:.6f} x 0.999 = {price:.6f}"
+        expectation = 'Fast movement'
         if atr and timeframe:
-            explanation_detail = f"ATR ({timeframe}) = {atr:.6f}, Formül: {math_exp}"
+            explanation_detail = f"ATR ({timeframe}) = {atr:.6f}, Formula: {math_exp}"
         else:
             explanation_detail = math_exp
         return {
             'price': price,
-            'risk_level': 'Orta',
+            'risk_level': 'Medium',
             'expectation': expectation,
             'explanation_detail': explanation_detail
         }
@@ -129,40 +129,40 @@ class DynamicEntryCalculator:
         atr: Optional[float] = None,
         timeframe: str = None
     ) -> Dict:
-        """Optimal giriş seviyesi.
+        """Optimal entry level.
         
-        Politika:
-        - ATR varsa, SHORT için current + 1.0*ATR (LONG için current - 1.0*ATR)
-        - ATR yoksa %1 fallback.
+        Policy:
+        - If ATR exists, for SHORT current + 1.0*ATR (for LONG current - 1.0*ATR)
+        - If no ATR, 1% fallback.
         """
         try:
             if atr is not None and timeframe is not None:
                 if direction == 'LONG':
                     price = current_price - atr
-                    form_str = f"Güncel Fiyat - ATR = {current_price:.6f} - {atr:.6f} = {price:.6f}"
+                    form_str = f"Current Price - ATR = {current_price:.6f} - {atr:.6f} = {price:.6f}"
                 else:
                     price = current_price + atr
-                    form_str = f"Güncel Fiyat + ATR = {current_price:.6f} + {atr:.6f} = {price:.6f}"
-                expectation = 'ATR bazlı düzeltme'
-                explanation_detail = f"ATR ({timeframe}) = {atr:.6f}, Formül: {form_str}"
+                    form_str = f"Current Price + ATR = {current_price:.6f} + {atr:.6f} = {price:.6f}"
+                expectation = 'ATR based correction'
+                explanation_detail = f"ATR ({timeframe}) = {atr:.6f}, Formula: {form_str}"
             else:
-                # Fallback: %1 düzeltme
+                # Fallback: 1% correction
                 if direction == 'LONG':
                     price = current_price * 0.99
-                    form_str = f"Güncel Fiyat x 0.99 = {current_price:.6f} x 0.99 = {price:.6f}"
+                    form_str = f"Current Price x 0.99 = {current_price:.6f} x 0.99 = {price:.6f}"
                 else:
                     price = current_price * 1.01
-                    form_str = f"Güncel Fiyat x 1.01 = {current_price:.6f} x 1.01 = {price:.6f}"
-                expectation = 'Standart düzeltme'
+                    form_str = f"Current Price x 1.01 = {current_price:.6f} x 1.01 = {price:.6f}"
+                expectation = 'Standard correction'
                 explanation_detail = form_str
             return {
                 'price': price,
-                'risk_level': 'Düşük',
+                'risk_level': 'Low',
                 'expectation': expectation,
                 'explanation_detail': explanation_detail
             }
         except Exception as e:
-            self.logger.warning(f"Optimal entry hesaplama hatası: {str(e)}")
+            self.logger.warning(f"Optimal entry calculation error: {str(e)}")
             return self._get_fallback_optimal_entry(current_price, direction)
 
     def _calculate_conservative_entry(
@@ -174,44 +174,44 @@ class DynamicEntryCalculator:
         atr: Optional[float] = None,
         timeframe: str = None
     ) -> Dict:
-        """En güvenli giriş seviyesi.
+        """Safest entry level.
         
-        Politika:
-        - ATR varsa, SHORT için current + 2.0*ATR (LONG için current - 2.0*ATR)
-        - ATR yoksa %3 fallback.
+        Policy:
+        - If ATR exists, for SHORT current + 2.0*ATR (for LONG current - 2.0*ATR)
+        - If no ATR, 3% fallback.
         """
         try:
             if atr is not None and timeframe is not None:
                 if direction == 'LONG':
                     price = current_price - (atr * SL_MULTIPLIER)
-                    form_str = f"Güncel Fiyat - {SL_MULTIPLIER} x ATR = {current_price:.6f} - {SL_MULTIPLIER} x {atr:.6f} = {price:.6f}"
+                    form_str = f"Current Price - {SL_MULTIPLIER} x ATR = {current_price:.6f} - {SL_MULTIPLIER} x {atr:.6f} = {price:.6f}"
                 else:
                     price = current_price + (atr * SL_MULTIPLIER)
-                    form_str = f"Güncel Fiyat + {SL_MULTIPLIER} x ATR = {current_price:.6f} + {SL_MULTIPLIER} x {atr:.6f} = {price:.6f}"
-                expectation = 'ATR bazlı güvenli seviye'
-                explanation_detail = f"ATR ({timeframe}) = {atr:.6f}, Formül: {form_str}"
+                    form_str = f"Current Price + {SL_MULTIPLIER} x ATR = {current_price:.6f} + {SL_MULTIPLIER} x {atr:.6f} = {price:.6f}"
+                expectation = 'ATR based safe level'
+                explanation_detail = f"ATR ({timeframe}) = {atr:.6f}, Formula: {form_str}"
             else:
-                # Fallback: %3 düzeltme
+                # Fallback: 3% correction
                 if direction == 'LONG':
                     price = current_price * 0.97
-                    form_str = f"Güncel Fiyat x 0.97 = {current_price:.6f} x 0.97 = {price:.6f}"
+                    form_str = f"Current Price x 0.97 = {current_price:.6f} x 0.97 = {price:.6f}"
                 else:
                     price = current_price * 1.03
-                    form_str = f"Güncel Fiyat x 1.03 = {current_price:.6f} x 1.03 = {price:.6f}"
-                expectation = 'Güçlü support/resistance'
+                    form_str = f"Current Price x 1.03 = {current_price:.6f} x 1.03 = {price:.6f}"
+                expectation = 'Strong support/resistance'
                 explanation_detail = form_str
             return {
                 'price': price,
-                'risk_level': 'Çok Düşük',
+                'risk_level': 'Very Low',
                 'expectation': expectation,
                 'explanation_detail': explanation_detail
             }
         except Exception as e:
-            self.logger.warning(f"Conservative entry hesaplama hatası: {str(e)}")
+            self.logger.warning(f"Conservative entry calculation error: {str(e)}")
             return self._get_fallback_conservative_entry(current_price, direction)
     
     def _calculate_risk_reward(self, entry_data: Dict, direction: str, atr: Optional[float]) -> float:
-        """Risk/Reward oranını hesaplar."""
+        """Calculates Risk/Reward ratio."""
         try:
             entry_price = entry_data['price']
             
@@ -236,26 +236,26 @@ class DynamicEntryCalculator:
             return 2.0
             
         except Exception as e:
-            self.logger.warning(f"Risk/Reward hesaplama hatası: {str(e)}")
+            self.logger.warning(f"Risk/Reward calculation error: {str(e)}")
             return 2.0
     
     def _calculate_price_change_pct(self, current_price: float, target_price: float) -> float:
-        """Fiyat değişim yüzdesini hesaplar."""
+        """Calculates price change percentage."""
         if current_price == 0:
             return 0.0
         return round((target_price - current_price) / current_price * 100, 2)
     
     def _is_reasonable_price(self, fib_price: float, current_price: float) -> bool:
-        """Fibonacci fiyatının makul aralıkta olup olmadığını kontrol eder."""
+        """Checks if Fibonacci price is within reasonable range."""
         if current_price == 0:
             return False
         
-        # %10'dan fazla sapma varsa makul değil
+        # If deviation is more than 10%, it is not reasonable
         change_pct = abs(fib_price - current_price) / current_price
         return change_pct <= 0.10
     
     def _get_fallback_entry_levels(self, current_price: float, direction: str) -> Dict:
-        """Hata durumunda fallback entry levels."""
+        """Fallback entry levels in case of error."""
         if direction == 'LONG':
             immediate_price = current_price * 1.001
             optimal_price = current_price * 0.99
@@ -268,22 +268,22 @@ class DynamicEntryCalculator:
         return {
             'immediate': {
                 'price': immediate_price,
-                'risk_level': 'Orta',
-                'expectation': 'Hızlı hareket',
+                'risk_level': 'Medium',
+                'expectation': 'Fast movement',
                 'risk_reward': 2.0,
                 'price_change_pct': 0.0
             },
             'optimal': {
                 'price': optimal_price,
-                'risk_level': 'Düşük',
-                'expectation': 'Standart düzeltme',
+                'risk_level': 'Low',
+                'expectation': 'Standard correction',
                 'risk_reward': 2.5,
                 'price_change_pct': self._calculate_price_change_pct(current_price, optimal_price)
             },
             'conservative': {
                 'price': conservative_price,
-                'risk_level': 'Çok Düşük',
-                'expectation': 'Güvenli seviye',
+                'risk_level': 'Very Low',
+                'expectation': 'Safe level',
                 'risk_reward': 3.0,
                 'price_change_pct': self._calculate_price_change_pct(current_price, conservative_price)
             }
@@ -298,8 +298,8 @@ class DynamicEntryCalculator:
         
         return {
             'price': price,
-            'risk_level': 'Düşük',
-            'expectation': 'Standart düzeltme'
+            'risk_level': 'Low',
+            'expectation': 'Standard correction'
         }
     
     def _get_fallback_conservative_entry(self, current_price: float, direction: str) -> Dict:
@@ -311,6 +311,6 @@ class DynamicEntryCalculator:
         
         return {
             'price': price,
-            'risk_level': 'Çok Düşük',
-            'expectation': 'Güvenli seviye'
+            'risk_level': 'Very Low',
+            'expectation': 'Safe level'
         }

@@ -1,9 +1,9 @@
 """
-MessageFormatter: Telegram mesaj formatlama sınıfı.
-Analiz sonuçlarını Türkçe emoji'li mesajlara çevirir.
+MessageFormatter: Telegram message formatting class.
+Converts analysis results into Turkish emoji messages.
 
-Not: Bu sınıf SignalFormatter ve TrackerFormatter'ı inherit eder.
-BaseFormatter ise her iki formatter tarafından inherit edilir.
+Note: This class inherits from SignalFormatter and TrackerFormatter.
+BaseFormatter is inherited by both formatters.
 """
 import time
 from typing import Dict, List, Any
@@ -13,7 +13,7 @@ from utils.logger import LoggerManager
 
 
 class MessageFormatter(SignalFormatter, TrackerFormatter):
-    """Telegram mesajlarını formatlar."""
+    """Formats Telegram messages."""
     
     def __init__(self):
         super().__init__()
@@ -23,15 +23,15 @@ class MessageFormatter(SignalFormatter, TrackerFormatter):
         self, top_signals: List[Dict[str, Any]]
     ) -> str:
         """
-        Trend özeti mesajı formatlar.
+        Formats trend summary message.
         
         Args:
-            top_signals: Top sinyal listesi
+            top_signals: Top signal list
             
         Returns:
-            Formatlanmış mesaj
+            Formatted message
         """
-        lines = ["🔍 PIYASA TREND ANALIZI\n"]
+        lines = ["🔍 MARKET TREND ANALYSIS\n"]
         
         for i, signal_data in enumerate(top_signals, 1):
             symbol = signal_data['symbol']
@@ -46,7 +46,7 @@ class MessageFormatter(SignalFormatter, TrackerFormatter):
             lines.append(
                 f"{i}. {symbol.replace('/USDT', '')}\n"
                 f"   {emoji} {direction_tr}\n"
-                f"   🎯 Güvenilirlik: %{confidence:.0f}\n"
+                f"   🎯 Confidence: %{confidence:.0f}\n"
             )
         
         msg = '\n'.join(lines)
@@ -60,16 +60,16 @@ class MessageFormatter(SignalFormatter, TrackerFormatter):
         self, top_signals: List[Dict[str, Any]], market_data: Any
     ) -> str:
         """
-        Trend özeti mesajı formatlar (güncel fiyatlarla).
+        Formats trend summary message (with current prices).
         
         Args:
-            top_signals: Top sinyal listesi
+            top_signals: Top signal list
             market_data: Market data manager
             
         Returns:
-            Formatlanmış mesaj
+            Formatted message
         """
-        lines = ["🔍 PIYASA TREND ANALIZI\n"]
+        lines = ["🔍 MARKET TREND ANALYSIS\n"]
         
         for i, signal_data in enumerate(top_signals, 1):
             symbol = signal_data['symbol']
@@ -81,22 +81,22 @@ class MessageFormatter(SignalFormatter, TrackerFormatter):
             emoji = self.DIRECTION_EMOJI[direction]
             direction_tr = self.DIRECTION_TR[direction]
             
-            # Güncel fiyatı al (tarih/saat ile)
+            # Get current price (with date/time)
             try:
                 current_price = market_data.get_latest_price(symbol)
                 if current_price:
                     current_timestamp = int(time.time())
                     price_text = self.format_price_with_timestamp(current_price, current_timestamp)
                 else:
-                    price_text = "💰 Fiyat alınamadı"
+                    price_text = "💰 Price unavailable"
             except Exception:
-                price_text = "💰 Fiyat alınamadı"
+                price_text = "💰 Price unavailable"
             
             lines.append(
                 f"{i}. {symbol.replace('/USDT', '')}\n"
                 f"   {emoji} {direction_tr}\n"
                 f"   {price_text}\n"
-                f"   🎯 Güvenilirlik: %{confidence:.0f}\n"
+                f"   🎯 Confidence: %{confidence:.0f}\n"
             )
         
         msg = '\n'.join(lines)
@@ -111,16 +111,16 @@ class MessageFormatter(SignalFormatter, TrackerFormatter):
         position: Dict, risk: Dict
     ) -> str:
         """
-        Detaylı analiz mesajı formatlar.
+        Formats detailed analysis message.
         
         Args:
             symbol: Trading pair
-            signal: Sinyal bilgisi
-            position: Pozisyon bilgisi
-            risk: Risk bilgisi
+            signal: Signal info
+            position: Position info
+            risk: Risk info
             
         Returns:
-            Formatlanmış detaylı mesaj
+            Formatted detailed message
         """
         direction = signal['direction']
         emoji = self.DIRECTION_EMOJI[direction]
@@ -128,46 +128,46 @@ class MessageFormatter(SignalFormatter, TrackerFormatter):
         confidence = signal['confidence'] * 100
         
         lines = [
-            f"📊 {symbol.replace('/USDT', '')} DETAYLI ANALİZ\n",
-            f"{emoji} Sinyal: {direction_tr}",
-            f"🎯 Güvenilirlik: %{confidence:.0f}"
+            f"📊 {symbol.replace('/USDT', '')} DETAILED ANALYSIS\n",
+            f"{emoji} Signal: {direction_tr}",
+            f"🎯 Confidence: %{confidence:.0f}"
         ]
         
-        # Güncel fiyat (her zaman göster)
+        # Current price (always show)
         if position and position.get('current_price'):
             current = position['current_price']
-            # Eğer timestamp bilgisi varsa ekle
+            # If timestamp info exists, add it
             timestamp = position.get('price_timestamp')
             if timestamp:
                 price_text = self.format_price_with_timestamp(current, timestamp)
             else:
-                price_text = f"📍 Güncel Fiyat: ${current:.4f}"
+                price_text = f"📍 Current Price: ${current:.4f}"
             lines.append(f"{price_text}\n")
         elif signal.get('timeframe_signals'):
-            # NEUTRAL ise ve position yoksa, sadece fiyat bilgisi için
-            # ilk timeframe'den fiyat çekmeye çalış (zaten çekilmiş olmalı)
+            # If NEUTRAL and no position, try to fetch price from first timeframe
+            # (should have been fetched already)
             lines.append("")
         else:
             lines.append("")
         
-        # Entry status uyarısı
+        # Entry status warning
         if position and position.get('entry_status'):
             warning = self._format_entry_warning(position)
             if warning:
                 lines.append(warning)
         
-        # Pozisyon bilgileri
+        # Position info
         if position:
             lines.extend(self._format_position_info(position))
         
-        # Risk yönetimi
+        # Risk management
         if risk:
-            lines.append("\n💼 Risk Yönetimi:")
+            lines.append("\n💼 Risk Management:")
             lines.append(self._format_risk_info(risk))
         
-        # Teknik göstergeler
+        # Technical indicators
         if 'timeframe_signals' in signal:
-            lines.append("\n📈 Timeframe Analizi:")
+            lines.append("\n📈 Timeframe Analysis:")
             lines.extend(
                 self._format_timeframe_signals(
                     signal['timeframe_signals']
@@ -182,7 +182,7 @@ class MessageFormatter(SignalFormatter, TrackerFormatter):
         return msg
     
     def _format_entry_warning(self, position: Dict) -> str:
-        """Entry status'a göre uyarı mesajı oluşturur."""
+        """Creates warning message based on entry status."""
         status = position.get('entry_status')
         current = position.get('current_price')
         entry = position.get('entry')
@@ -191,49 +191,49 @@ class MessageFormatter(SignalFormatter, TrackerFormatter):
         if status == 'PRICE_MOVED' and fib_ideal:
             diff_percent = abs((current - fib_ideal) / fib_ideal) * 100
             return (
-                f"\n⚠️ FİYAT KAÇMIŞ!\n"
-                f"İdeal Giriş: ${fib_ideal:.4f} (%{diff_percent:.1f} uzakta)\n"
-                f"Not: Pozisyon seviyeler güncel fiyattan hesaplandı.\n"
+                f"\n⚠️ PRICE MOVED!\n"
+                f"Ideal Entry: ${fib_ideal:.4f} (%{diff_percent:.1f} away)\n"
+                f"Note: Position levels calculated from current price.\n"
             )
         elif status == 'WAIT_FOR_PULLBACK' and fib_ideal:
             return (
-                f"\n💡 DÜZELTMEYİ BEKLEYİN\n"
-                f"İdeal Giriş: ${fib_ideal:.4f}\n"
-                f"Strateji: Fiyatın bu seviyeye gelmesini bekleyin.\n"
+                f"\n💡 WAIT FOR PULLBACK\n"
+                f"Ideal Entry: ${fib_ideal:.4f}\n"
+                f"Strategy: Wait for price to reach this level.\n"
             )
         elif status == 'PULLBACK_EXPECTED' and fib_ideal:
             return (
-                f"\n📍 İDEAL GİRİŞ SEVİYESİ\n"
-                f"Hedef: ${fib_ideal:.4f}\n"
+                f"\n📍 IDEAL ENTRY LEVEL\n"
+                f"Target: ${fib_ideal:.4f}\n"
             )
         
         return ""
     
     def _format_position_info(self, position: Dict[str, Any]) -> List[str]:
-        """Pozisyon bilgilerini formatlar."""
-        # Sadece current_price varsa bu NEUTRAL dummy position
+        """Formats position info."""
+        # If only current_price exists, this is NEUTRAL dummy position
         if 'entry' not in position:
             return []
         
         lines = [
-            "\n💡 BU FİYATTAN POZİSYON ALMAK İSTENİRSE:"
+            "\n💡 IF POSITION IS DESIRED AT THIS PRICE:"
         ]
         
-        # Entry status'a göre etiket belirle
+        # Determine label based on entry status
         entry_status = position.get('entry_status')
         entry = position['entry']
         
-        # Eğer düzeltme bekleniyorsa "İdeal Giriş", değilse "Giriş"
+        # If pullback expected "Ideal Entry", else "Entry"
         if entry_status in ['WAIT_FOR_PULLBACK', 'PULLBACK_EXPECTED']:
-            lines.append(f"💰 İdeal Giriş: ${entry:.4f}")
+            lines.append(f"💰 Ideal Entry: ${entry:.4f}")
         else:
             # PRICE_MOVED veya None (optimal)
-            lines.append(f"💰 Giriş: ${entry:.4f}")
+            lines.append(f"💰 Entry: ${entry:.4f}")
         
         lines.append(f"🛡️ Stop-Loss: ${position['stop_loss']:.4f}")
         lines.append(f"📍 Risk: %{position['risk_percent']:.2f}\n")
         
-        lines.append("🎯 Take-Profit Seviyeleri:")
+        lines.append("🎯 Take-Profit Levels:")
         for i, target in enumerate(position['targets'], 1):
             lines.append(
                 f"   TP{i}: ${target['price']:.4f} "
@@ -243,23 +243,23 @@ class MessageFormatter(SignalFormatter, TrackerFormatter):
         return lines
     
     def _format_risk_info(self, risk: Dict) -> str:
-        """Risk bilgilerini formatlar."""
+        """Formats risk info."""
         risk_tr = {
-            'low': 'Düşük',
-            'medium': 'Orta',
-            'high': 'Yüksek'
+            'low': 'Low',
+            'medium': 'Medium',
+            'high': 'High'
         }
         
         return (
-            f"   Risk Seviyesi: {risk_tr[risk['risk_level']]}\n"
-            f"   Pozisyon Büyüklüğü: %{risk['position_size_percent']:.1f}\n"
+            f"   Risk Level: {risk_tr[risk['risk_level']]}\n"
+            f"   Position Size: %{risk['position_size_percent']:.1f}\n"
             f"   ⚡ Leverage: {risk['leverage']}x"
         )
     
     def _format_timeframe_signals(
         self, tf_signals: Dict[str, Dict[str, Any]]
     ) -> List[str]:
-        """Timeframe sinyallerini formatlar."""
+        """Formats timeframe signals."""
         lines = []
         
         for tf in ['1h', '4h', '1d']:
@@ -277,32 +277,32 @@ class MessageFormatter(SignalFormatter, TrackerFormatter):
     
     def format_error_message(self, error_type: str) -> str:
         """
-        Hata mesajı formatlar.
+        Formats error message.
         
         Args:
-            error_type: Hata tipi
+            error_type: Error type
             
         Returns:
-            Formatlanmış hata mesajı
+            Formatted error message
         """
         messages = {
             'no_data': (
-                "❌ Veri alınamadı\n"
-                "Lütfen daha sonra tekrar deneyin."
+                "❌ Data unavailable\n"
+                "Please try again later."
             ),
             'invalid_symbol': (
-                "❌ Geçersiz sembol\n"
-                "Lütfen geçerli bir coin sembolü girin."
+                "❌ Invalid symbol\n"
+                "Please enter a valid coin symbol."
             ),
             'analysis_failed': (
-                "❌ Analiz başarısız\n"
-                "Teknik bir hata oluştu."
+                "❌ Analysis failed\n"
+                "A technical error occurred."
             )
         }
         
         msg = messages.get(
             error_type,
-            "❌ Bir hata oluştu."
+            "❌ An error occurred."
         )
         try:
             self.logger.debug(f"format_error_message: type={error_type}")
@@ -312,18 +312,18 @@ class MessageFormatter(SignalFormatter, TrackerFormatter):
     
     def format_settings_message(self, notifications_enabled: bool) -> str:
         """
-        Ayarlar mesajı formatlar.
+        Formats settings message.
         
         Args:
-            notifications_enabled: Bildirim durumu
+            notifications_enabled: Notification status
             
         Returns:
-            Formatlanmış ayarlar mesajı
+            Formatted settings message
         """
-        status = "Açık ✅" if notifications_enabled else "Kapalı ❌"
+        status = "On ✅" if notifications_enabled else "Off ❌"
         
         return (
-            "⚙️ AYARLAR\n\n"
-            f"🔔 Saatlik Bildirimler: {status}\n\n"
-            "Bildirimleri değiştirmek için tekrar /settings yazın."
+            "⚙️ SETTINGS\n\n"
+            f"🔔 Hourly Notifications: {status}\n\n"
+            "Type /settings again to toggle notifications."
         )

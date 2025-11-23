@@ -1,7 +1,7 @@
 """
-Proje genelinde kullanılan sabit değerler.
+Constant values used throughout the project.
 """
 
-# Stop-Loss Çarpanı (ATR tabanlı)
-# Standart: 2.0 (2x ATR)
+# Stop-Loss Multiplier (ATR based)
+# Standard: 2.0 (2x ATR)
 SL_MULTIPLIER = 2.0

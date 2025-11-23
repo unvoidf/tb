@@ -1,55 +1,55 @@
 """
-MessageHelper: Telegram mesaj gönderme ve düzenleme helper'ları.
+MessageHelper: Telegram message sending and editing helpers.
 Markdown formatting, error handling, retry logic.
 """
 from utils.logger import LoggerManager
 
 
 class MessageHelper:
-    """Telegram mesaj işlemleri için helper sınıfı."""
+    """Helper class for Telegram message operations."""
     
     def __init__(self):
         self.logger = LoggerManager().get_logger('MessageHelper')
     
     def validate_message_length(self, message: str, max_length: int = 4096) -> bool:
         """
-        Mesaj uzunluğunu kontrol eder.
+        Checks message length.
         
         Args:
-            message: Mesaj
-            max_length: Maximum uzunluk (Telegram limiti: 4096)
+            message: Message
+            max_length: Maximum length (Telegram limit: 4096)
             
         Returns:
-            True ise geçerli
+            True if valid
         """
         return len(message) <= max_length
     
     def truncate_message(self, message: str, max_length: int = 4096) -> str:
         """
-        Mesajı kısaltır.
+        Truncates the message.
         
         Args:
-            message: Mesaj
-            max_length: Maximum uzunluk
+            message: Message
+            max_length: Maximum length
             
         Returns:
-            Kısaltılmış mesaj
+            Truncated message
         """
         if len(message) <= max_length:
             return message
         
-        truncated = message[:max_length-50] + "\n\n...(mesaj kısaltıldı)"
+        truncated = message[:max_length-50] + "\n\n...(message truncated)"
         return truncated
     
     def should_retry_on_error(self, error_message: str) -> bool:
         """
-        Hata mesajına göre retry yapılıp yapılmayacağını belirler.
+        Determines whether to retry based on the error message.
         
         Args:
-            error_message: Hata mesajı
+            error_message: Error message
             
         Returns:
-            True ise retry yapılmalı
+            True if retry should be attempted
         """
         retry_errors = [
             'timeout',
@@ -60,4 +60,3 @@ class MessageHelper:
         
         error_lower = error_message.lower()
         return any(err in error_lower for err in retry_errors)
-

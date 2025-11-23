@@ -1,6 +1,6 @@
 """
-ConfigManager: Uygulama konfigürasyonunu yöneten sınıf.
-.env dosyasından environment variables okur ve sabit parametreleri tutar.
+ConfigManager: Class managing application configuration.
+Reads environment variables from .env file and holds constant parameters.
 """
 import os
 from typing import Dict, List
@@ -8,10 +8,10 @@ from dotenv import load_dotenv
 
 
 class ConfigManager:
-    """Merkezi konfigürasyon yöneticisi."""
+    """Central configuration manager."""
     
     def __init__(self):
-        """ConfigManager'ı başlatır ve .env dosyasını yükler."""
+        """Initializes ConfigManager and loads .env file."""
         load_dotenv()
         self._validate_env_variables()
         self._load_exchange_env()
@@ -22,23 +22,23 @@ class ConfigManager:
         self._load_fibonacci_levels()
         
     def _validate_env_variables(self) -> None:
-        """Gerekli environment variable'ların varlığını kontrol eder."""
+        """Checks for existence of required environment variables."""
         required_vars = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHANNEL_ID']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         
         if missing_vars:
             raise ValueError(
-                f"Eksik environment variables: {', '.join(missing_vars)}"
+                f"Missing environment variables: {', '.join(missing_vars)}"
             )
 
     def _load_exchange_env(self) -> None:
-        """Binance/Futures ortam değişkenlerini ve mod anahtarını yükler."""
+        """Loads Binance/Futures environment variables and mode key."""
         self.binance_mode = os.getenv('BINANCE_MODE', 'testnet').lower()  # testnet|mainnet
         self.binance_api_key = os.getenv('BINANCE_API_KEY', '')
         self.binance_api_secret = os.getenv('BINANCE_API_SECRET', '')
-        # Phase 0'da emir yok; anahtarlar boş olabilir. Phase 3'te zorunlu olacak.
+        # No orders in Phase 0; keys can be empty. Will be mandatory in Phase 3.
 
-        # HTTP ayarları
+        # HTTP settings
         try:
             self.recv_window_ms = int(os.getenv('BINANCE_RECV_WINDOW_MS', '5000'))
         except Exception:
@@ -49,7 +49,7 @@ class ConfigManager:
             self.http_timeout_ms = 10000
 
     def _load_phase0_thresholds(self) -> None:
-        """Phase 0 için latency ve clock drift eşikleri."""
+        """Latency and clock drift thresholds for Phase 0."""
         try:
             self.clock_drift_warn_ms = int(os.getenv('CLOCK_DRIFT_WARN_MS', '1000'))
         except Exception:
@@ -68,7 +68,7 @@ class ConfigManager:
             self.latency_crit_ms = 800
     
     def _load_technical_parameters(self) -> None:
-        """Teknik analiz parametrelerini yükler."""
+        """Loads technical analysis parameters."""
         self.rsi_period = 14
         self.macd_fast = 12
         self.macd_slow = 26
@@ -83,7 +83,7 @@ class ConfigManager:
         self.volume_ma_period = 20
         
     def _load_risk_parameters(self) -> None:
-        """Risk yönetimi parametrelerini yükler."""
+        """Loads risk management parameters."""
         self.risk_low = 0.01  # %1
         self.risk_medium = 0.03  # %3
         self.risk_high = 0.05  # %5
@@ -112,19 +112,19 @@ class ConfigManager:
     
     @property
     def optimize_risk_ranges(self) -> List[float]:
-        """Optimization engine için risk aralıkları."""
+        """Risk ranges for Optimization engine."""
         default = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
         return self._parse_float_list('OPTIMIZE_RISK_RANGES', default)
     
     @property
     def optimize_leverage_ranges(self) -> List[int]:
-        """Optimization engine için kaldıraç aralıkları."""
+        """Leverage ranges for Optimization engine."""
         default = [1, 2, 3, 4, 5, 7, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50]
         return self._parse_int_list('OPTIMIZE_LEVERAGE_RANGES', default)
     
     @property
     def optimize_min_sl_liq_buffer(self) -> float:
-        """Simulation engine için SL ile liquidation arası minimum buffer (default: 0.01 = %1)."""
+        """Minimum buffer between SL and liquidation for Simulation engine (default: 0.01 = 1%)."""
         try:
             val = os.getenv('OPTIMIZE_MIN_SL_LIQ_BUFFER')
             return float(val) if val is not None else 0.01
@@ -133,19 +133,19 @@ class ConfigManager:
     
     @property
     def safetyfilter_risk_ranges(self) -> List[float]:
-        """Liquidation safety filter için risk aralıkları."""
+        """Risk ranges for Liquidation safety filter."""
         default = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
         return self._parse_float_list('SAFETYFILTER_RISK_RANGES', default)
     
     @property
     def safetyfilter_leverage_ranges(self) -> List[int]:
-        """Liquidation safety filter için kaldıraç aralıkları."""
+        """Leverage ranges for Liquidation safety filter."""
         default = [1, 2, 3, 4, 5, 7, 10, 12, 15, 20]
         return self._parse_int_list('SAFETYFILTER_LEVERAGE_RANGES', default)
     
     @property
     def safetyfilter_min_sl_liq_buffer(self) -> float:
-        """SL ile liquidation arası minimum buffer (default: 0.01 = %1)."""
+        """Minimum buffer between SL and liquidation (default: 0.01 = 1%)."""
         try:
             val = os.getenv('SAFETYFILTER_MIN_SL_LIQ_BUFFER')
             return float(val) if val is not None else 0.01
@@ -162,26 +162,26 @@ class ConfigManager:
             return 0.004
         
     def _load_fibonacci_levels(self) -> None:
-        """Fibonacci seviyelerini yükler."""
+        """Loads Fibonacci levels."""
         self.fib_levels = [0.236, 0.382, 0.618, 0.786]
         self.fib_extensions = [1.0, 1.618, 2.618]
         self.swing_lookback = 100
         
     @property
     def telegram_token(self) -> str:
-        """Telegram bot token'ını döndürür."""
+        """Returns Telegram bot token."""
         return os.getenv('TELEGRAM_BOT_TOKEN')
     
     @property
     def telegram_channel_id(self) -> str:
-        """Telegram kanal ID'sini döndürür."""
+        """Returns Telegram channel ID."""
         return os.getenv('TELEGRAM_CHANNEL_ID')
 
     @property
     def confidence_threshold(self) -> float:
-        """Sinyal eşiği (.env -> CONFIDENCE_THRESHOLD), yoksa 0.69.
+        """Signal threshold (.env -> CONFIDENCE_THRESHOLD), else 0.69.
 
-        Örnek .env:
+        Example .env:
             CONFIDENCE_THRESHOLD=0.69
         """
         try:
@@ -192,9 +192,9 @@ class ConfigManager:
     
     @property
     def cooldown_hours(self) -> int:
-        """Cooldown süresi (.env -> COOLDOWN_HOURS), yoksa 1 saat.
+        """Cooldown duration (.env -> COOLDOWN_HOURS), else 1 hour.
 
-        Örnek .env:
+        Example .env:
             COOLDOWN_HOURS=1
         """
         try:
@@ -205,9 +205,9 @@ class ConfigManager:
     
     @property
     def signal_tracker_interval_minutes(self) -> int:
-        """Signal tracker kontrol interval'i (.env -> SIGNAL_TRACKER_INTERVAL_MINUTES), yoksa 1 dakika.
+        """Signal tracker check interval (.env -> SIGNAL_TRACKER_INTERVAL_MINUTES), else 1 minute.
 
-        Örnek .env:
+        Example .env:
             SIGNAL_TRACKER_INTERVAL_MINUTES=1
         """
         try:
@@ -218,37 +218,37 @@ class ConfigManager:
     
     @property
     def timeframes(self) -> List[str]:
-        """Analiz edilecek timeframe listesini döndürür."""
+        """Returns list of timeframes to analyze."""
         return ['1h', '4h', '1d']
     
     @property
     def timeframe_weights(self) -> Dict[str, float]:
-        """Timeframe ağırlıklarını döndürür."""
+        """Returns timeframe weights."""
         return {'1h': 0.40, '4h': 0.35, '1d': 0.25}
     
     @property
     def top_coins_count(self) -> int:
-        """Analiz edilecek top coin sayısını döndürür."""
+        """Returns number of top coins to analyze."""
         return 20
     
     @property
     def top_signals_count(self) -> int:
-        """Raporlanacak top sinyal sayısını döndürür."""
+        """Returns number of top signals to report."""
         return 5
     
     @property
     def volume_spike_threshold(self) -> float:
-        """Hacim spike eşiğini döndürür."""
+        """Returns volume spike threshold."""
         return 1.5
     
     @property
     def adx_thresholds(self) -> Dict[str, float]:
-        """ADX eşiklerini döndürür."""
+        """Returns ADX thresholds."""
         return {'weak': 20, 'strong': 40}
     
     @property
     def retry_config(self) -> Dict[str, any]:
-        """API retry konfigürasyonunu döndürür."""
+        """Returns API retry configuration."""
         return {
             'max_attempts': 5,
             'backoff_base': 2,
@@ -258,22 +258,22 @@ class ConfigManager:
     @property
     def ranging_min_sl_percent(self) -> float:
         """
-        Ranging stratejisinde minimum stop mesafesi (% olarak).
+        Minimum stop distance for ranging strategy (as %).
 
-        .env -> RANGING_MIN_SL_PERCENT (örn: 0.5 -> %0.5, 1 -> %1)
+        .env -> RANGING_MIN_SL_PERCENT (e.g., 0.5 -> 0.5%, 1 -> 1%)
         """
         try:
             val = os.getenv('RANGING_MIN_SL_PERCENT')
             if val is None:
                 return 0.5
             parsed = float(val)
-            return max(parsed, 0.1)  # en az %0.1
+            return max(parsed, 0.1)  # at least 0.1%
         except Exception:
             return 0.5
     
     @property
     def log_config(self) -> Dict[str, any]:
-        """Log konfigürasyonunu döndürür (.env'den okur)."""
+        """Returns log configuration (reads from .env)."""
         # LOG_MAX_BYTES (default: 10MB)
         try:
             max_bytes_str = os.getenv('LOG_MAX_BYTES')
@@ -321,15 +321,15 @@ class ConfigManager:
         }
 
     def _load_phase1_env(self) -> None:
-        """Phase 1 için mod ve kaldıraç ayarlarını .env'den okur."""
+        """Reads mode and leverage settings from .env for Phase 1."""
         self.position_mode = (os.getenv('POSITION_MODE', 'oneway').lower())  # oneway|hedge
         self.margin_mode = (os.getenv('MARGIN_MODE', 'isolated').lower())    # isolated|cross
-        # Kaldıraç sabitleri
+        # Leverage constants
         try:
             self.leverage_global = int(os.getenv('LEVERAGE_GLOBAL', '5'))
         except Exception:
             self.leverage_global = 5
-        # Sembol bazlı override: BTCUSDT:10,ETHUSDT:8
+        # Symbol based override: BTCUSDT:10,ETHUSDT:8
         overrides_str = os.getenv('LEVERAGE_SYMBOL_OVERRIDES', '')
         self.leverage_symbol_overrides = {}
         if overrides_str:
@@ -343,10 +343,10 @@ class ConfigManager:
     
     @property
     def whitelist_ids(self) -> List[int]:
-        """Whitelist user ID'lerini döndürür."""
+        """Returns whitelist user IDs."""
         whitelist_str = os.getenv('WHITELIST_IDS', '')
         if not whitelist_str:
-            return []  # Boş liste = tüm kullanıcılar
+            return []  # Empty list = all users
         
         try:
             return [int(uid.strip()) for uid in whitelist_str.split(',')]
@@ -355,7 +355,7 @@ class ConfigManager:
     
     @property
     def admin_user_ids(self) -> List[int]:
-        """Admin user ID'lerini döndürür (error notifications için)."""
+        """Returns Admin user IDs (for error notifications)."""
         admin_str = os.getenv('ADMIN_USER_IDS', '')
         if not admin_str:
             return []

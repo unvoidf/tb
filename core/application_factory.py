@@ -1,6 +1,6 @@
 """
-ApplicationFactory: Uygulama bileşenlerini oluşturan factory.
-Tüm servisleri initialize eder ve bağımlılıkları çözer.
+ApplicationFactory: Factory creating application components.
+Initializes all services and resolves dependencies.
 """
 from typing import Dict, Any, Optional
 from core.service_container import ServiceContainer
@@ -33,21 +33,21 @@ from scheduler.components.signal_tracker_scheduler import SignalTrackerScheduler
 
 
 class ApplicationFactory:
-    """Uygulama bileşenlerini oluşturan factory."""
+    """Factory creating application components."""
     
     def __init__(self):
-        """ApplicationFactory'ı başlatır."""
+        """Initializes ApplicationFactory."""
         self.container = ServiceContainer()
         self.logger = LoggerManager().get_logger('ApplicationFactory')
     
     def create_application(self) -> Dict[str, Any]:
         """
-        Tüm uygulama bileşenlerini oluşturur.
+        Creates all application components.
         
         Returns:
-            Uygulama bileşenleri dict
+            Application components dict
         """
-        self.logger.info("Uygulama bileşenleri oluşturuluyor...")
+        self.logger.info("Creating application components...")
         
         # Config
         config = self._create_config()
@@ -86,10 +86,10 @@ class ApplicationFactory:
         
         # Command Handler removed
         
-        # Telegram bot'u önce oluştur (reminder_manager olmadan)
+        # Create Telegram bot first (without reminder_manager)
         telegram_bot = self._create_telegram_bot(config)
         
-        # Lifecycle bildirimlerini configure et (kanal + cache)
+        # Configure lifecycle notifications (channel + cache)
         try:
             telegram_bot.configure_lifecycle_notifications(config.telegram_channel_id, None)
         except Exception:
@@ -99,13 +99,13 @@ class ApplicationFactory:
         signal_database = self._create_signal_database()
         signal_repository = self._create_signal_repository(signal_database)
         
-        # Signal Tracker System (SignalScannerManager'dan önce oluştur, inject edilecek)
+        # Signal Tracker System (Create before SignalScannerManager, will be injected)
         signal_tracker = self._create_signal_tracker(
             signal_repository, market_data, telegram_bot, message_formatter
         )
         signal_tracker_scheduler = self._create_signal_tracker_scheduler(signal_tracker, config)
         
-        # SignalTracker'ı TelegramBotManager'a set et (callback handler için)
+        # Set SignalTracker to TelegramBotManager (for callback handler)
         telegram_bot.set_signal_tracker(signal_tracker)
         
         # Risk Reward Calculator
@@ -115,7 +115,7 @@ class ApplicationFactory:
         # Liquidation Safety Filter
         liquidation_safety_filter = self._create_liquidation_safety_filter(config)
         
-        # Signal Scanner System (SignalTracker'ı inject et)
+        # Signal Scanner System (Inject SignalTracker)
         signal_scanner_manager = self._create_signal_scanner_manager(
             coin_filter, market_data, signal_generator, dynamic_entry_calc, 
             message_formatter, telegram_bot, signal_repository, config,
@@ -156,11 +156,11 @@ class ApplicationFactory:
         }
     
     def _create_config(self) -> ConfigManager:
-        """Config manager oluşturur."""
+        """Creates config manager."""
         return ConfigManager()
     
     def _create_logger(self, config: ConfigManager) -> LoggerManager:
-        """Logger manager oluşturur."""
+        """Creates logger manager."""
         log_cfg = config.log_config
         return LoggerManager(
             log_dir=log_cfg['log_dir'],
@@ -173,7 +173,7 @@ class ApplicationFactory:
         )
     
     def _create_retry_handler(self, config: ConfigManager) -> RetryHandler:
-        """Retry handler oluşturur."""
+        """Creates retry handler."""
         retry_cfg = config.retry_config
         return RetryHandler(
             max_attempts=retry_cfg['max_attempts'],
@@ -182,15 +182,15 @@ class ApplicationFactory:
         )
     
     def _create_market_data_manager(self, retry_handler: RetryHandler) -> MarketDataManager:
-        """Market data manager oluşturur."""
+        """Creates market data manager."""
         return MarketDataManager(retry_handler)
     
     def _create_coin_filter(self, retry_handler: RetryHandler) -> CoinFilter:
-        """Coin filter oluşturur."""
+        """Creates coin filter."""
         return CoinFilter(retry_handler)
     
     def _create_technical_indicators(self, config: ConfigManager) -> TechnicalIndicatorCalculator:
-        """Technical indicators oluşturur."""
+        """Creates technical indicators."""
         return TechnicalIndicatorCalculator(
             rsi_period=config.rsi_period,
             macd_fast=config.macd_fast,
@@ -206,32 +206,32 @@ class ApplicationFactory:
         )
     
     def _create_volume_analyzer(self, config: ConfigManager) -> VolumeAnalyzer:
-        """Volume analyzer oluşturur."""
+        """Creates volume analyzer."""
         return VolumeAnalyzer(
             volume_ma_period=config.volume_ma_period,
             spike_threshold=config.volume_spike_threshold
         )
     
     def _create_fibonacci_calculator(self, config: ConfigManager) -> FibonacciCalculator:
-        """Fibonacci calculator oluşturur."""
+        """Creates Fibonacci calculator."""
         return FibonacciCalculator(
             fib_levels=config.fib_levels,
             swing_lookback=config.swing_lookback
         )
     
     def _create_adaptive_thresholds(self, config: ConfigManager) -> AdaptiveThresholdManager:
-        """Adaptive thresholds oluşturur."""
+        """Creates adaptive thresholds."""
         return AdaptiveThresholdManager(
             adx_weak_threshold=config.adx_thresholds['weak'],
             adx_strong_threshold=config.adx_thresholds['strong']
         )
     
     def _create_ranging_strategy_analyzer(self, config: ConfigManager) -> RangingStrategyAnalyzer:
-        """Ranging strateji analizörü oluşturur."""
+        """Creates ranging strategy analyzer."""
         logger_manager = self.container.get_optional(LoggerManager)
         min_sl_percent = config.ranging_min_sl_percent
         
-        # Debug: Config'den gelen değeri logla
+        # Debug: Log value from config
         if logger_manager:
             logger = logger_manager.get_logger("ApplicationFactory")
             logger.debug(
@@ -246,7 +246,7 @@ class ApplicationFactory:
                                 threshold_manager: AdaptiveThresholdManager,
                                 config: ConfigManager,
                                 market_data: MarketDataManager = None) -> SignalGenerator:
-        """Signal generator oluşturur."""
+        """Creates signal generator."""
         ranging_analyzer = self._create_ranging_strategy_analyzer(config)
         self.container.register_singleton(RangingStrategyAnalyzer, ranging_analyzer)
         return SignalGenerator(
@@ -259,11 +259,11 @@ class ApplicationFactory:
         )
     
     def _create_position_calculator(self, fib_calculator: FibonacciCalculator) -> PositionCalculator:
-        """Position calculator oluşturur."""
+        """Creates position calculator."""
         return PositionCalculator(fib_calculator)
     
     def _create_risk_manager(self, config: ConfigManager) -> RiskManager:
-        """Risk manager oluşturur."""
+        """Creates risk manager."""
         return RiskManager(
             risk_low=config.risk_low,
             risk_medium=config.risk_medium,
@@ -273,18 +273,18 @@ class ApplicationFactory:
         )
     
     def _create_user_whitelist(self, config: ConfigManager) -> UserWhitelist:
-        """User whitelist oluşturur."""
+        """Creates user whitelist."""
         return UserWhitelist(config.whitelist_ids)
     
     def _create_message_formatter(self) -> MessageFormatter:
-        """Message formatter oluşturur."""
+        """Creates message formatter."""
         return MessageFormatter()
     
     # Command Handler creator removed
     
     def _create_telegram_bot(self, config: ConfigManager, 
                            reminder_manager: Optional[Any] = None) -> TelegramBotManager:
-        """Telegram bot oluşturur."""
+        """Creates Telegram bot."""
         return TelegramBotManager(
             token=config.telegram_token,
             reminder_manager=reminder_manager
@@ -296,7 +296,7 @@ class ApplicationFactory:
                                  coin_filter: CoinFilter,
                                  market_data: MarketDataManager,
                                  config: ConfigManager) -> AnalysisScheduler:
-        """Analysis scheduler oluşturur."""
+        """Creates analysis scheduler."""
         return AnalysisScheduler(
             bot_manager=telegram_bot,
             signal_generator=signal_generator,
@@ -310,22 +310,22 @@ class ApplicationFactory:
     
     def _create_dynamic_entry_calculator(self, fib_calculator: FibonacciCalculator, 
                                        position_calc: PositionCalculator) -> DynamicEntryCalculator:
-        """Dynamic entry calculator oluşturur."""
+        """Creates dynamic entry calculator."""
         return DynamicEntryCalculator(fib_calculator, position_calc)
     
     def _create_signal_database(self) -> SignalDatabase:
-        """Signal database oluşturur."""
+        """Creates signal database."""
         return SignalDatabase()
     
     def _create_signal_repository(self, database: SignalDatabase) -> SignalRepository:
-        """Signal repository oluşturur."""
+        """Creates signal repository."""
         return SignalRepository(database)
     
     def _create_liquidation_safety_filter(self, config: ConfigManager) -> LiquidationSafetyFilter:
-        """Liquidation safety filter oluşturur."""
+        """Creates liquidation safety filter."""
         return LiquidationSafetyFilter(
             mmr=config.mmr,
-            min_sl_liq_buffer=None  # .env'den otomatik okunacak (SAFETYFILTER_MIN_SL_LIQ_BUFFER)
+            min_sl_liq_buffer=None  # will be read from .env (SAFETYFILTER_MIN_SL_LIQ_BUFFER)
         )
     
     def _create_signal_scanner_manager(self, coin_filter: CoinFilter,
@@ -339,7 +339,7 @@ class ApplicationFactory:
                                      risk_reward_calc: RiskRewardCalculator,
                                      liquidation_safety_filter: LiquidationSafetyFilter,
                                      signal_tracker: Optional[SignalTracker] = None) -> SignalScannerManager:
-        """Signal scanner manager oluşturur."""
+        """Creates signal scanner manager."""
         return SignalScannerManager(
             coin_filter=coin_filter,
             market_data=market_data,
@@ -358,14 +358,14 @@ class ApplicationFactory:
         )
     
     def _create_signal_scanner_scheduler(self, scanner_manager: SignalScannerManager) -> SignalScannerScheduler:
-        """Signal scanner scheduler oluşturur."""
+        """Creates signal scanner scheduler."""
         return SignalScannerScheduler(scanner_manager)
     
     def _create_signal_tracker(self, signal_repository: SignalRepository,
                                market_data: MarketDataManager,
                                bot_manager: TelegramBotManager,
                                message_formatter: MessageFormatter) -> SignalTracker:
-        """Signal tracker oluşturur."""
+        """Creates signal tracker."""
         return SignalTracker(
             signal_repository=signal_repository,
             market_data=market_data,
@@ -378,6 +378,6 @@ class ApplicationFactory:
         signal_tracker: SignalTracker, 
         config: ConfigManager
     ) -> SignalTrackerScheduler:
-        """Signal tracker scheduler oluşturur."""
+        """Creates signal tracker scheduler."""
         interval_minutes = config.signal_tracker_interval_minutes
         return SignalTrackerScheduler(signal_tracker, interval_minutes=interval_minutes)

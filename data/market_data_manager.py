@@ -1,6 +1,6 @@
 """
-MarketDataManager: Binance'den piyasa verilerini çeken sınıf.
-OHLCV verilerini farklı timeframe'ler için sağlar.
+MarketDataManager: Class that fetches market data from Binance.
+Provides OHLCV data for different timeframes.
 """
 import ccxt
 import pandas as pd
@@ -12,54 +12,54 @@ from utils.exchange_factory import ExchangeFactory
 
 
 class MarketDataManager:
-    """Binance API'den piyasa verilerini yönetir."""
+    """Manages market data from Binance API."""
     
     def __init__(self, retry_handler: RetryHandler):
         """
-        MarketDataManager'ı başlatır.
+        Initializes MarketDataManager.
         
         Args:
-            retry_handler: Retry mekanizması instance
+            retry_handler: Retry mechanism instance
         """
         self.exchange = ExchangeFactory.create_binance_futures()
         self.retry_handler = retry_handler
         self.logger = LoggerManager().get_logger('MarketData')
 
-        # Geçerli semboller için whitelist (exchange markets)
+        # Whitelist for valid symbols (exchange markets)
         try:
             markets = self.exchange.load_markets()
-            self.valid_symbols = set(markets.keys())  # örn: 'BTC/USDT'
+            self.valid_symbols = set(markets.keys())  # e.g. 'BTC/USDT'
         except Exception as e:
             self.logger.error(
-                f"Markets yüklenemedi: {str(e)}",
+                f"Markets could not be loaded: {str(e)}",
                 exc_info=True
             )
             self.valid_symbols = set()
 
         # OHLCV cache: {(symbol, timeframe): (timestamp, df)}
         self._ohlcv_cache: Dict[Tuple[str, str], Tuple[float, pd.DataFrame]] = {}
-        self._ohlcv_ttl_seconds: int = 300  # 5 dakika cache
+        self._ohlcv_ttl_seconds: int = 300  # 5 minutes cache
 
     def is_valid_symbol(self, symbol: str) -> bool:
-        """Sembol whitelist kontrolü yapar."""
+        """Checks symbol whitelist."""
         valid_symbols = getattr(self, 'valid_symbols', set())
         
         if not valid_symbols:
-            self.logger.warning("valid_symbols boş! Markets yüklenmemiş olabilir.")
+            self.logger.warning("valid_symbols is empty! Markets might not be loaded.")
             return False
         
-        # Direkt kontrol
+        # Direct check
         if symbol in valid_symbols:
             return True
         
-        # Eğer symbol zaten futures formatındaysa (BTC/USDT:USDT), 
-        # normal formatını da kontrol et (BTC/USDT)
+        # If symbol is already in futures format (BTC/USDT:USDT), 
+        # check normal format too (BTC/USDT)
         if ':USDT' in symbol or ':USDC' in symbol:
             normalized = symbol.split(':')[0]  # BTC/USDT:USDT -> BTC/USDT
             if normalized in valid_symbols:
                 return True
             
-        # Futures sembol formatını normalize et ve kontrol et
+        # Normalize futures symbol format and check
         # (BTC/USDT -> BTC/USDT:USDT)
         futures_symbol = f"{symbol}:USDT"
         if futures_symbol in valid_symbols:
@@ -70,24 +70,24 @@ class MarketDataManager:
     def fetch_ohlcv(self, symbol: str, timeframe: str, 
                     limit: int = 200) -> Optional[pd.DataFrame]:
         """
-        Belirtilen sembol için OHLCV verisi çeker.
+        Fetches OHLCV data for the specified symbol.
         
         Args:
-            symbol: Trading pair (örn: 'BTC/USDT')
-            timeframe: Zaman dilimi ('1h', '4h', '1d')
-            limit: Çekilecek mum sayısı
+            symbol: Trading pair (e.g. 'BTC/USDT')
+            timeframe: Timeframe ('1h', '4h', '1d')
+            limit: Number of candles to fetch
             
         Returns:
-            OHLCV verisi içeren DataFrame veya None
+            DataFrame containing OHLCV data or None
         """
         # Sembol whitelist kontrolü
         if not self.is_valid_symbol(symbol):
             self.logger.warning(
-                f"Geçersiz sembol (whitelist dışı): symbol={symbol} timeframe={timeframe}"
+                f"Invalid symbol (not in whitelist): symbol={symbol} timeframe={timeframe}"
             )
             return None
 
-        # Kısa ömürlü cache kontrolü
+        # Short-lived cache check
         cache_key = (symbol, timeframe)
         now_ts = time.time()
         cached = self._ohlcv_cache.get(cache_key)
@@ -105,7 +105,7 @@ class MarketDataManager:
             )
             
             if not ohlcv:
-                self.logger.warning(f"{symbol} için veri bulunamadı")
+                self.logger.warning(f"Data not found for {symbol}")
                 return None
             
             df = pd.DataFrame(
@@ -115,25 +115,25 @@ class MarketDataManager:
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             
             self.logger.info(
-                f"{symbol} - {timeframe}: {len(df)} mum verisi çekildi"
+                f"{symbol} - {timeframe}: {len(df)} candles fetched"
             )
             self.logger.debug(
                 f"{symbol} - {timeframe}: head=\n{df.head(3)}"
             )
             
-            # Cache'e yaz
+            # Write to cache
             self._ohlcv_cache[cache_key] = (now_ts, df)
             return df
             
         except ccxt.BadSymbol as e:
-            # BadSymbol durumunda retry yapma, uyarı logla
+            # Do not retry on BadSymbol, log warning
             self.logger.warning(
-                f"Geçersiz sembol: symbol={symbol} error={str(e)}"
+                f"Invalid symbol: symbol={symbol} error={str(e)}"
             )
             return None
         except Exception as e:
             self.logger.error(
-                f"{symbol} verisi çekilirken hata: {str(e)}",
+                f"Error fetching data for {symbol}: {str(e)}",
                 exc_info=True
             )
             return None
@@ -142,21 +142,21 @@ class MarketDataManager:
                              timeframes: List[str],
                              limit: int = 200) -> Dict[str, pd.DataFrame]:
         """
-        Birden fazla timeframe için OHLCV verisi çeker.
-        1d timeframe için adaptive limit uygular.
+        Fetches OHLCV data for multiple timeframes.
+        Applies adaptive limit for 1d timeframe.
         
         Args:
             symbol: Trading pair
-            timeframes: Timeframe listesi
-            limit: Her timeframe için çekilecek mum sayısı
+            timeframes: List of timeframes
+            limit: Number of candles to fetch for each timeframe
             
         Returns:
-            Timeframe'lere göre DataFrame dict
+            Dict of DataFrames by timeframe
         """
         result = {}
         
         for tf in timeframes:
-            # 1d timeframe için adaptive limit
+            # Adaptive limit for 1d timeframe
             if tf == '1d':
                 df = self._fetch_adaptive_ohlcv(symbol, tf, limit)
             else:
@@ -170,19 +170,19 @@ class MarketDataManager:
     def _fetch_adaptive_ohlcv(self, symbol: str, timeframe: str, 
                              ideal_limit: int = 200) -> Optional[pd.DataFrame]:
         """
-        1d timeframe için adaptive OHLCV verisi çeker.
-        Önce ideal limit ile dener, yeterli veri yoksa mevcut veriyi kullanır.
+        Fetches adaptive OHLCV data for 1d timeframe.
+        Tries with ideal limit first, uses available data if not enough.
         
         Args:
             symbol: Trading pair
             timeframe: Timeframe (1d)
-            ideal_limit: İdeal mum sayısı (200)
+            ideal_limit: Ideal number of candles (200)
             
         Returns:
-            OHLCV DataFrame veya None
+            OHLCV DataFrame or None
         """
         try:
-            # Önce ideal limit ile dene
+            # Try with ideal limit first
             ohlcv = self.retry_handler.execute(
                 self.exchange.fetch_ohlcv,
                 symbol,
@@ -191,7 +191,7 @@ class MarketDataManager:
             )
             
             if not ohlcv:
-                self.logger.warning(f"{symbol} için {timeframe} veri bulunamadı")
+                self.logger.warning(f"Data not found for {symbol} {timeframe}")
                 return None
             
             df = pd.DataFrame(
@@ -200,37 +200,37 @@ class MarketDataManager:
             )
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             
-            # Veri kalitesi kontrolü
+            # Data quality check
             if not self._validate_ohlcv_quality(df, symbol, timeframe):
-                self.logger.warning(f"{symbol} {timeframe} veri kalitesi düşük, analiz edilmiyor")
+                self.logger.warning(f"{symbol} {timeframe} low data quality, skipping analysis")
                 return None
             
             data_count = len(df)
             
-            # Veri miktarına göre log mesajı
+            # Log message based on data amount
             if data_count >= ideal_limit:
                 self.logger.info(
-                    f"{symbol} - {timeframe}: {data_count} mum verisi çekildi (ideal)"
+                    f"{symbol} - {timeframe}: {data_count} candles fetched (ideal)"
                 )
             else:
                 self.logger.info(
-                    f"{symbol} - {timeframe}: {data_count} mum verisi çekildi "
-                    f"(adaptive - {ideal_limit - data_count} gün eksik)"
+                    f"{symbol} - {timeframe}: {data_count} candles fetched "
+                    f"(adaptive - {ideal_limit - data_count} days missing)"
                 )
                 
-                # Coin yaşı bilgisi
+                # Coin age info
                 first_date = df['timestamp'].iloc[0]
                 days_old = (pd.Timestamp.now() - first_date).days
                 self.logger.debug(
-                    f"{symbol} futures yaşı: {days_old} gün "
-                    f"(ilk tarih: {first_date.strftime('%Y-%m-%d')})"
+                    f"{symbol} futures age: {days_old} days "
+                    f"(first date: {first_date.strftime('%Y-%m-%d')})"
                 )
             
             self.logger.debug(
                 f"{symbol} - {timeframe}: head=\n{df.head(3)}"
             )
             
-            # Cache'e yaz
+            # Write to cache
             cache_key = (symbol, timeframe)
             now_ts = time.time()
             self._ohlcv_cache[cache_key] = (now_ts, df)
@@ -239,90 +239,90 @@ class MarketDataManager:
             
         except ccxt.BadSymbol as e:
             self.logger.warning(
-                f"Geçersiz sembol: symbol={symbol} error={str(e)}"
+                f"Invalid symbol: symbol={symbol} error={str(e)}"
             )
             return None
         except Exception as e:
             self.logger.error(
-                f"{symbol} adaptive verisi çekilirken hata: {str(e)}",
+                f"Error fetching adaptive data for {symbol}: {str(e)}",
                 exc_info=True
             )
             return None
     
     def _validate_ohlcv_quality(self, df: pd.DataFrame, symbol: str, timeframe: str) -> bool:
         """
-        OHLCV veri kalitesini kontrol eder.
+        Validates OHLCV data quality.
         
         Args:
             df: OHLCV DataFrame
             symbol: Trading pair
-            timeframe: Zaman dilimi
+            timeframe: Timeframe
             
         Returns:
-            True ise kaliteli veri
+            True if data is quality
         """
         try:
-            # Boş veri kontrolü
+            # Empty data check
             if df.empty:
-                self.logger.debug(f"{symbol} {timeframe}: Boş veri")
+                self.logger.debug(f"{symbol} {timeframe}: Empty data")
                 return False
             
-            # NaN kontrolü
+            # NaN check
             nan_count = df.isnull().sum().sum()
             if nan_count > 0:
-                self.logger.debug(f"{symbol} {timeframe}: {nan_count} NaN değer var")
+                self.logger.debug(f"{symbol} {timeframe}: {nan_count} NaN values found")
                 return False
             
-            # Sıfır fiyat kontrolü
+            # Zero price check
             zero_prices = ((df['open'] <= 0) | (df['high'] <= 0) | 
                           (df['low'] <= 0) | (df['close'] <= 0)).sum()
             if zero_prices > 0:
-                self.logger.debug(f"{symbol} {timeframe}: {zero_prices} sıfır fiyat var")
+                self.logger.debug(f"{symbol} {timeframe}: {zero_prices} zero prices found")
                 return False
             
-            # Volume kontrolü
+            # Volume check
             zero_volume_count = (df['volume'] <= 0).sum()
-            if zero_volume_count > len(df) * 0.5:  # %50'den fazla sıfır volume
-                self.logger.debug(f"{symbol} {timeframe}: {zero_volume_count} sıfır volume ({len(df)} mum)")
+            if zero_volume_count > len(df) * 0.5:  # More than 50% zero volume
+                self.logger.debug(f"{symbol} {timeframe}: {zero_volume_count} zero volume ({len(df)} candles)")
                 return False
             
-            # OHLC mantık kontrolü
+            # OHLC logic check
             invalid_ohlc = ((df['high'] < df['low']) | 
                            (df['high'] < df['open']) | 
                            (df['high'] < df['close']) |
                            (df['low'] > df['open']) | 
                            (df['low'] > df['close'])).sum()
             if invalid_ohlc > 0:
-                self.logger.debug(f"{symbol} {timeframe}: {invalid_ohlc} geçersiz OHLC")
+                self.logger.debug(f"{symbol} {timeframe}: {invalid_ohlc} invalid OHLC")
                 return False
             
-            # Çok düşük fiyat değişimi kontrolü (ölü coin)
+            # Very low price change check (dead coin)
             price_changes = df['close'].pct_change().abs()
-            low_volatility_count = (price_changes < 0.001).sum()  # %0.1'den az değişim
-            if low_volatility_count > len(df) * 0.8:  # %80'den fazla düşük volatilite
-                self.logger.debug(f"{symbol} {timeframe}: {low_volatility_count} düşük volatilite ({len(df)} mum)")
+            low_volatility_count = (price_changes < 0.001).sum()  # Less than 0.1% change
+            if low_volatility_count > len(df) * 0.8:  # More than 80% low volatility
+                self.logger.debug(f"{symbol} {timeframe}: {low_volatility_count} low volatility ({len(df)} candles)")
                 return False
             
             return True
             
         except Exception as e:
-            self.logger.error(f"{symbol} {timeframe} veri kalitesi kontrolü hatası: {str(e)}")
+            self.logger.error(f"{symbol} {timeframe} data quality check error: {str(e)}")
             return False
     
     def get_latest_price(self, symbol: str) -> Optional[float]:
         """
-        Sembolün güncel fiyatını döndürür.
+        Returns current price of the symbol.
         
         Args:
             symbol: Trading pair
             
         Returns:
-            Güncel fiyat veya None
+            Current price or None
         """
-        # Sembol whitelist kontrolü
+        # Symbol whitelist check
         if not self.is_valid_symbol(symbol):
             self.logger.warning(
-                f"Geçersiz sembol (price): symbol={symbol}"
+                f"Invalid symbol (price): symbol={symbol}"
             )
             return None
 
@@ -337,24 +337,24 @@ class MarketDataManager:
             
         except Exception as e:
             self.logger.error(
-                f"{symbol} fiyatı çekilirken hata: {str(e)}"
+                f"Error fetching price for {symbol}: {str(e)}"
             )
             return None
     
     def get_latest_price_with_timestamp(self, symbol: str) -> Tuple[Optional[float], Optional[int]]:
         """
-        Sembolün güncel fiyatını timestamp ile döndürür.
+        Returns current price of the symbol with timestamp.
         
         Args:
             symbol: Trading pair
             
         Returns:
-            (Güncel fiyat, timestamp) veya (None, None)
+            (Current price, timestamp) or (None, None)
         """
-        # Sembol whitelist kontrolü
+        # Symbol whitelist check
         if not self.is_valid_symbol(symbol):
             self.logger.warning(
-                f"Geçersiz sembol (price): symbol={symbol}"
+                f"Invalid symbol (price): symbol={symbol}"
             )
             return None, None
 
@@ -368,24 +368,24 @@ class MarketDataManager:
             
         except Exception as e:
             self.logger.error(
-                f"{symbol} fiyatı çekilirken hata: {str(e)}"
+                f"Error fetching price for {symbol}: {str(e)}"
             )
             return None, None
     
     def get_ticker_info(self, symbol: str) -> Optional[Dict]:
         """
-        Sembol için detaylı ticker bilgisi döndürür.
+        Returns detailed ticker info for the symbol.
         
         Args:
             symbol: Trading pair
             
         Returns:
-            Ticker bilgisi dict veya None
+            Ticker info dict or None
         """
-        # Sembol whitelist kontrolü
+        # Symbol whitelist check
         if not self.is_valid_symbol(symbol):
             self.logger.warning(
-                f"Geçersiz sembol (ticker): symbol={symbol}"
+                f"Invalid symbol (ticker): symbol={symbol}"
             )
             return None
 
@@ -398,56 +398,56 @@ class MarketDataManager:
             
         except Exception as e:
             self.logger.error(
-                f"{symbol} ticker bilgisi alınırken hata: {str(e)}"
+                f"Error fetching ticker info for {symbol}: {str(e)}"
             )
             return None
     
     def get_historical_price(self, symbol: str, target_timestamp: int) -> Optional[float]:
         """
-        Belirli bir zaman noktasındaki fiyatı döndürür.
+        Returns price at a specific point in time.
         
         Args:
             symbol: Trading pair
-            target_timestamp: Unix timestamp (saniye)
+            target_timestamp: Unix timestamp (seconds)
             
         Returns:
-            O zaman noktasındaki fiyat veya None
+            Price at that time point or None
         """
-        # Sembol whitelist kontrolü
+        # Symbol whitelist check
         if not self.is_valid_symbol(symbol):
             self.logger.warning(
-                f"Geçersiz sembol (historical): symbol={symbol}"
+                f"Invalid symbol (historical): symbol={symbol}"
             )
             return None
 
         try:
-            # 1 saatlik veri çek (daha az API çağrısı)
+            # Fetch 1 hour of data (fewer API calls)
             df = self.fetch_ohlcv(symbol, '1h', limit=50)
             if df is None or df.empty:
                 return None
             
-            # Target timestamp'i datetime'a çevir
+            # Convert target timestamp to datetime
             target_dt = pd.to_datetime(target_timestamp, unit='s')
             
-            # En yakın mum'u bul
+            # Find the closest candle
             df_sorted = df.sort_values('timestamp')
             
-            # Target time'dan önceki en son mum'u bul
+            # Find the last candle before target time
             before_target = df_sorted[df_sorted['timestamp'] <= target_dt]
             
             if before_target.empty:
-                # Target time'dan sonraki ilk mum'u al
+                # Get the first candle after target time
                 after_target = df_sorted[df_sorted['timestamp'] > target_dt]
                 if not after_target.empty:
                     return float(after_target.iloc[0]['close'])
                 return None
             
-            # En yakın mum'un close fiyatını döndür
+            # Return close price of the closest candle
             closest_mum = before_target.iloc[-1]
             price = float(closest_mum['close'])
             
             self.logger.info(
-                f"{symbol} - {target_dt.strftime('%Y-%m-%d %H:%M')} fiyatı: ${price:,.2f}"
+                f"{symbol} - {target_dt.strftime('%Y-%m-%d %H:%M')} price: ${price:,.2f}"
             )
             self.logger.debug(
                 f"get_historical_price: target={target_dt}, chosen_close={price}, before_rows={len(before_target)}"
@@ -457,68 +457,68 @@ class MarketDataManager:
             
         except Exception as e:
             self.logger.error(
-                f"{symbol} tarihsel fiyat alınırken hata: {str(e)}"
+                f"Error fetching historical price for {symbol}: {str(e)}"
             )
             return None
     
     def get_historical_price_with_timestamp(self, symbol: str, target_timestamp: int) -> Tuple[Optional[float], Optional[int]]:
         """
-        Belirli bir zaman noktasındaki fiyatı timestamp ile döndürür.
+        Returns price at a specific point in time with timestamp.
         
         Args:
             symbol: Trading pair
-            target_timestamp: Unix timestamp (saniye)
+            target_timestamp: Unix timestamp (seconds)
             
         Returns:
-            (O zaman noktasındaki fiyat, timestamp) veya (None, None)
+            (Price at that time point, timestamp) or (None, None)
         """
-        # Sembol whitelist kontrolü
+        # Symbol whitelist check
         if not self.is_valid_symbol(symbol):
             self.logger.warning(
-                f"Geçersiz sembol (historical): symbol={symbol}"
+                f"Invalid symbol (historical): symbol={symbol}"
             )
             return None, None
 
         try:
-            # 1 saatlik veri çek (daha az API çağrısı)
+            # Fetch 1 hour of data (fewer API calls)
             df = self.fetch_ohlcv(symbol, '1h', limit=50)
             if df is None or df.empty:
                 return None, None
             
-            # Target timestamp'i datetime'a çevir
+            # Convert target timestamp to datetime
             target_dt = pd.to_datetime(target_timestamp, unit='s')
             
-            # En yakın mum'u bul
+            # Find the closest candle
             df_sorted = df.sort_values('timestamp')
             
-            # Target time'dan önceki en son mum'u bul
+            # Find the last candle before target time
             before_target = df_sorted[df_sorted['timestamp'] <= target_dt]
             
             if before_target.empty:
-                # Target time'dan sonraki ilk mum'u al
+                # Get the first candle after target time
                 after_target = df_sorted[df_sorted['timestamp'] > target_dt]
                 if not after_target.empty:
                     price = float(after_target.iloc[0]['close'])
-                    # Mum'un timestamp'ini al
+                    # Get candle timestamp
                     mum_timestamp = int(after_target.iloc[0]['timestamp'].timestamp())
                     return price, mum_timestamp
                 return None, None
             
-            # En yakın mum'un close fiyatını döndür
+            # Return close price of the closest candle
             closest_mum = before_target.iloc[-1]
             price = float(closest_mum['close'])
-            # Mum'un timestamp'ini al
+            # Get candle timestamp
             mum_timestamp = int(closest_mum['timestamp'].timestamp())
             
             self.logger.info(
-                f"{symbol} - {target_dt.strftime('%Y-%m-%d %H:%M')} fiyatı: ${price:,.2f}"
+                f"{symbol} - {target_dt.strftime('%Y-%m-%d %H:%M')} price: ${price:,.2f}"
             )
             
             return price, mum_timestamp
             
         except Exception as e:
             self.logger.error(
-                f"{symbol} tarihsel fiyat alınırken hata: {str(e)}"
+                f"Error fetching historical price for {symbol}: {str(e)}"
             )
             return None, None
 

@@ -1,6 +1,6 @@
 """
-TrackerFormatter: Pozisyon takip ve tahmin mesajları için formatlama.
-Kar/zarar takibi, fiyat tahminleri ve pozisyon durumu mesajları.
+TrackerFormatter: Formatting for position tracking and prediction messages.
+Profit/loss tracking, price predictions, and position status messages.
 """
 import os
 from typing import Dict, List, Optional
@@ -9,58 +9,58 @@ from bot.formatters.base_formatter import BaseFormatter
 
 
 class TrackerFormatter(BaseFormatter):
-    """Pozisyon takip ve tahmin mesajlarını formatlar."""
+    """Formats position tracking and prediction messages."""
     
     def format_profit_check(self, symbol: str, position: Dict,
                            current_price: float, pnl: Dict,
                            target_progress: List, risk_status: Dict) -> str:
         """
-        Pozisyon kar/zarar takibi mesajı formatlar.
+        Formats position profit/loss tracking message.
         
         Args:
             symbol: Trading pair
-            position: Pozisyon bilgisi
-            current_price: Güncel fiyat
-            pnl: Kar/zarar bilgisi
-            target_progress: Hedef ilerleme listesi
-            risk_status: Risk durumu
+            position: Position info
+            current_price: Current price
+            pnl: Profit/loss info
+            target_progress: Target progress list
+            risk_status: Risk status
             
         Returns:
-            Formatlanmış profit check mesajı
+            Formatted profit check message
         """
         direction = position['direction']
         direction_emoji = self.DIRECTION_EMOJI[direction]
         
-        # Kar/zarar emoji ve renk
+        # Profit/loss emoji and color
         if pnl['is_profit']:
             pnl_emoji = "✅"
-            pnl_status = "Kar"
+            pnl_status = "Profit"
         else:
             pnl_emoji = "❌"
-            pnl_status = "Zarar"
+            pnl_status = "Loss"
         
-        # Fiyat değişimi
+        # Price change
         price_change = (
             (current_price - position['entry']) / position['entry']
         ) * 100
         price_emoji = "📈" if price_change > 0 else "📉"
         
-        # Güncel fiyat timestamp'i (eğer varsa)
+        # Current price timestamp (if available)
         current_timestamp = position.get('current_price_timestamp')
         if current_timestamp:
             current_price_text = self.format_price_with_timestamp(current_price, current_timestamp)
         else:
-            current_price_text = f"📍 Güncel: ${current_price:.4f} ({price_emoji}{price_change:+.2f}%)"
+            current_price_text = f"📍 Current: ${current_price:.4f} ({price_emoji}{price_change:+.2f}%)"
         
         lines = [
-            f"📊 POZİSYON TAKİBİ - {symbol.replace('/USDT', '')}\n",
-            f"{direction_emoji} Yön: {self.DIRECTION_TR[direction]}",
-            f"💰 Giriş: ${position['entry']:.4f}",
+            f"📊 POSITION TRACKING - {symbol.replace('/USDT', '')}\n",
+            f"{direction_emoji} Direction: {self.DIRECTION_TR[direction]}",
+            f"💰 Entry: ${position['entry']:.4f}",
             f"{current_price_text}\n"
         ]
         
-        # Kar/Zarar
-        lines.append(f"💵 Kar/Zarar Durumu:")
+        # Profit/Loss
+        lines.append(f"💵 Profit/Loss Status:")
         lines.append(
             f"{pnl_emoji} {pnl_status}: "
             f"${pnl['pnl_amount']:.2f} ({pnl['pnl_percent']:+.2f}%)"
@@ -69,21 +69,21 @@ class TrackerFormatter(BaseFormatter):
         if position['leverage'] > 1:
             lines.append(f"⚡ Leverage: {position['leverage']}x")
             lines.append(
-                f"💰 Gerçek Kar/Zarar: "
+                f"💰 Real Profit/Loss: "
                 f"{pnl['real_pnl_percent']:+.2f}%\n"
             )
         else:
             lines.append("")
         
-        # Hedef ilerleme
-        lines.append("🎯 Hedeflere Uzaklık:")
+        # Target progress
+        lines.append("🎯 Distance to Targets:")
         for i, progress in enumerate(target_progress, 1):
             target_price = progress['target_price']
             prog_percent = progress['progress']
             reached = progress['reached']
             
             if reached:
-                status = "✅ Ulaşıldı!"
+                status = "✅ Reached!"
                 prog_bar = "█" * 10
             else:
                 status = f"%{prog_percent:.0f}"
@@ -97,11 +97,11 @@ class TrackerFormatter(BaseFormatter):
         
         lines.append("")
         
-        # Stop-loss durumu
+        # Stop-loss status
         sl_emoji = "🛡️"
         if risk_status['is_hit']:
             sl_emoji = "💥"
-            lines.append(f"{sl_emoji} Stop-Loss Tetiklendi!")
+            lines.append(f"{sl_emoji} Stop-Loss Triggered!")
         else:
             lines.append(
                 f"{sl_emoji} Stop-Loss: "
@@ -111,9 +111,9 @@ class TrackerFormatter(BaseFormatter):
             
             risk_level = risk_status['risk_level']
             if risk_level == 'CRITICAL':
-                lines.append("⚠️⚠️ SL'ye ÇOK YAKINSINIZ!")
+                lines.append("⚠️⚠️ VERY CLOSE TO SL!")
             elif risk_level == 'HIGH':
-                lines.append("⚠️ SL'ye yaklaştınız!")
+                lines.append("⚠️ Close to SL!")
         
         msg = '\n'.join(lines)
         try:
@@ -126,30 +126,30 @@ class TrackerFormatter(BaseFormatter):
         self, symbol: str, probabilities: Dict[str, Dict[str, float]]
     ) -> str:
         """
-        Tahmin mesajını formatlar.
+        Formats prediction message.
         
         Args:
-            symbol: Coin sembolü (örn: BTC/USDT)
-            probabilities: Timeframe bazlı ihtimaller
+            symbol: Coin symbol (e.g., BTC/USDT)
+            probabilities: Timeframe based probabilities
                           {'1h': {'up': 65, 'down': 35}, ...}
         
         Returns:
-            Formatlanmış mesaj
+            Formatted message
         """
         clean_symbol = symbol.replace('/USDT', '')
-        lines = [f"🔮 {clean_symbol} TAHMİN\n"]
+        lines = [f"🔮 {clean_symbol} PREDICTION\n"]
         
-        # Yükseliş ihtimalleri
-        lines.append("📈 Yükseliş İhtimali:")
+        # Bullish probabilities
+        lines.append("📈 Bullish Probability:")
         for tf in ['1h', '4h', '24h']:
             if tf in probabilities:
                 up_prob = probabilities[tf]['up']
                 lines.append(f"   {tf}: %{up_prob:.0f}")
         
-        lines.append("")  # Boş satır
+        lines.append("")  # Empty line
         
-        # Düşüş ihtimalleri
-        lines.append("📉 Düşüş İhtimali:")
+        # Bearish probabilities
+        lines.append("📉 Bearish Probability:")
         for tf in ['1h', '4h', '24h']:
             if tf in probabilities:
                 down_prob = probabilities[tf]['down']
@@ -172,21 +172,21 @@ class TrackerFormatter(BaseFormatter):
         tf_breakdown: List[str] | None = None
     ) -> str:
         """
-        Fiyat tahmin mesajını formatlar.
+        Formats price forecast message.
         
         Args:
-            symbol: Coin (örn: BTC/USDT)
-            generated_at: Tahmin oluşturulma zamanı
-            current_price: Güncel fiyat
+            symbol: Coin (e.g., BTC/USDT)
+            generated_at: Forecast generation time
+            current_price: Current price
             forecasts: {'1h': price, '4h': price, '24h': price}
-            summary_line: Özet bilgi satırı
-            tf_breakdown: Timeframe bazlı detay listesi
+            summary_line: Summary info line
+            tf_breakdown: Timeframe based detail list
         
         Returns:
-            Formatlanmış mesaj
+            Formatted message
         """
         clean = symbol.replace('/USDT', '')
-        # Yerel saat formatı: Önce TZ env, yoksa sistem saat dilimi
+        # Local time format: First TZ env, otherwise system timezone
         tz_name = os.getenv('TZ')
         try:
             base_utc = generated_at.replace(tzinfo=timezone.utc)
@@ -194,29 +194,29 @@ class TrackerFormatter(BaseFormatter):
                 from zoneinfo import ZoneInfo
                 local_dt = base_utc.astimezone(ZoneInfo(tz_name))
             else:
-                # Container'ın /etc/localtime ayarına göre yerel saat
+                # Local time based on container's /etc/localtime setting
                 local_dt = base_utc.astimezone()
             ts_str = local_dt.strftime('%Y-%m-%d %H:%M')
         except Exception:
-            # Son çare: UTC göster
+            # Last resort: Show UTC
             ts_str = generated_at.strftime('%Y-%m-%d %H:%M UTC')
         
         def fmt(price: float) -> str:
             if price is None:
                 return "-"
-            # 1$ ve üzeri: 2 ondalık, binlik ayraç; 1$ altı: 6 ondalık
+            # 1$ and above: 2 decimals, thousand separator; below 1$: 6 decimals
             if abs(price) >= 1:
                 return f"${price:,.2f}"
             return f"${price:,.6f}"
         
         lines = [
-            f"🔮 {clean} FİYAT TAHMİNİ",
-            f"🕒 {ts_str} itibarıyla",
-            f"📍 Güncel Fiyat: {fmt(current_price)}",
+            f"🔮 {clean} PRICE FORECAST",
+            f"🕒 As of {ts_str}",
+            f"📍 Current Price: {fmt(current_price)}",
             "",
         ]
         
-        # Opsiyonel özet
+        # Optional summary
         if summary_line:
             lines.append(summary_line)
         if tf_breakdown:
@@ -224,10 +224,10 @@ class TrackerFormatter(BaseFormatter):
         if summary_line or tf_breakdown:
             lines.append("")
         
-        lines.append("📅 Tahmini Fiyatlar:")
+        lines.append("📅 Estimated Prices:")
         
-        # Sıralı yazdırma
-        mapping = [('1h', '1 Saat Sonra'), ('4h', '4 Saat Sonra'), ('24h', '24 Saat Sonra')]
+        # Sequential printing
+        mapping = [('1h', 'After 1 Hour'), ('4h', 'After 4 Hours'), ('24h', 'After 24 Hours')]
         for key, label in mapping:
             if key in forecasts and forecasts[key] is not None:
                 val = forecasts[key]
@@ -242,4 +242,3 @@ class TrackerFormatter(BaseFormatter):
         except Exception:
             pass
         return msg
-

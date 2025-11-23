@@ -1,19 +1,19 @@
 """
-Custom Exceptions: TrendBot özel exception sınıfları.
-Hata yönetimi için hiyerarşik exception yapısı.
+Custom Exceptions: TrendBot custom exception classes.
+Hierarchical exception structure for error handling.
 """
 
 
 class TrendBotException(Exception):
-    """TrendBot base exception sınıfı."""
+    """TrendBot base exception class."""
     
     def __init__(self, message: str, error_code: str = None):
         """
-        TrendBotException'ı başlatır.
+        Initializes TrendBotException.
         
         Args:
-            message: Hata mesajı
-            error_code: Hata kodu
+            message: Error message
+            error_code: Error code
         """
         super().__init__(message)
         self.message = message
@@ -21,59 +21,59 @@ class TrendBotException(Exception):
 
 
 class AnalysisException(TrendBotException):
-    """Teknik analiz hataları."""
+    """Technical analysis errors."""
     
     def __init__(self, message: str, symbol: str = None):
         """
-        AnalysisException'ı başlatır.
+        Initializes AnalysisException.
         
         Args:
-            message: Hata mesajı
-            symbol: Analiz edilen sembol
+            message: Error message
+            symbol: Analyzed symbol
         """
         super().__init__(message, "ANALYSIS_ERROR")
         self.symbol = symbol
 
 
 class DataException(TrendBotException):
-    """Veri çekme hataları."""
+    """Data fetching errors."""
     
     def __init__(self, message: str, source: str = None):
         """
-        DataException'ı başlatır.
+        Initializes DataException.
         
         Args:
-            message: Hata mesajı
-            source: Veri kaynağı
+            message: Error message
+            source: Data source
         """
         super().__init__(message, "DATA_ERROR")
         self.source = source
 
 
 class BotException(TrendBotException):
-    """Telegram bot hataları."""
+    """Telegram bot errors."""
     
     def __init__(self, message: str, user_id: int = None):
         """
-        BotException'ı başlatır.
+        Initializes BotException.
         
         Args:
-            message: Hata mesajı
-            user_id: Kullanıcı ID
+            message: Error message
+            user_id: User ID
         """
         super().__init__(message, "BOT_ERROR")
         self.user_id = user_id
 
 
 class SchedulerException(TrendBotException):
-    """Scheduler hataları."""
+    """Scheduler errors."""
     
     def __init__(self, message: str, job_id: str = None):
         """
-        SchedulerException'ı başlatır.
+        Initializes SchedulerException.
         
         Args:
-            message: Hata mesajı
+            message: Error message
             job_id: Job ID
         """
         super().__init__(message, "SCHEDULER_ERROR")
@@ -81,60 +81,60 @@ class SchedulerException(TrendBotException):
 
 
 class ConfigurationException(TrendBotException):
-    """Konfigürasyon hataları."""
+    """Configuration errors."""
     
     def __init__(self, message: str, config_key: str = None):
         """
-        ConfigurationException'ı başlatır.
+        Initializes ConfigurationException.
         
         Args:
-            message: Hata mesajı
-            config_key: Konfigürasyon anahtarı
+            message: Error message
+            config_key: Configuration key
         """
         super().__init__(message, "CONFIG_ERROR")
         self.config_key = config_key
 
 
 class ValidationException(TrendBotException):
-    """Veri doğrulama hataları."""
+    """Data validation errors."""
     
     def __init__(self, message: str, field: str = None):
         """
-        ValidationException'ı başlatır.
+        Initializes ValidationException.
         
         Args:
-            message: Hata mesajı
-            field: Doğrulanan alan
+            message: Error message
+            field: Validated field
         """
         super().__init__(message, "VALIDATION_ERROR")
         self.field = field
 
 
 class NetworkException(TrendBotException):
-    """Ağ bağlantı hataları."""
+    """Network connection errors."""
     
     def __init__(self, message: str, url: str = None):
         """
-        NetworkException'ı başlatır.
+        Initializes NetworkException.
         
         Args:
-            message: Hata mesajı
-            url: Bağlantı URL'i
+            message: Error message
+            url: Connection URL
         """
         super().__init__(message, "NETWORK_ERROR")
         self.url = url
 
 
 class RateLimitException(TrendBotException):
-    """Rate limit hataları."""
+    """Rate limit errors."""
     
     def __init__(self, message: str, retry_after: int = None):
         """
-        RateLimitException'ı başlatır.
+        Initializes RateLimitException.
         
         Args:
-            message: Hata mesajı
-            retry_after: Tekrar deneme süresi (saniye)
+            message: Error message
+            retry_after: Retry duration (seconds)
         """
         super().__init__(message, "RATE_LIMIT_ERROR")
         self.retry_after = retry_after

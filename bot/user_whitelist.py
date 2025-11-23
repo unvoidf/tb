@@ -1,35 +1,35 @@
 """
-UserWhitelist: Kullanıcı erişim kontrolü.
-Yetkili user ID'leri kontrol eder.
+UserWhitelist: User access control.
+Checks authorized user IDs.
 """
 from typing import List, Set
 from utils.logger import LoggerManager
 
 
 class UserWhitelist:
-    """Bot erişim kontrolü yapar."""
+    """Performs bot access control."""
     
     def __init__(self, whitelist_ids: List[int] = None):
         """
-        UserWhitelist'i başlatır.
+        Initializes UserWhitelist.
         
         Args:
-            whitelist_ids: Yetkili user ID listesi
+            whitelist_ids: List of authorized user IDs
         """
         self.whitelist: Set[int] = set(whitelist_ids or [])
         self.logger = LoggerManager().get_logger('UserWhitelist')
     
     def is_authorized(self, user_id: int) -> bool:
         """
-        Kullanıcının yetkili olup olmadığını kontrol eder.
+        Checks if the user is authorized.
         
         Args:
             user_id: Telegram user ID
             
         Returns:
-            True ise yetkili
+            True if authorized
         """
-        # Whitelist boşsa tüm kullanıcılara izin ver
+        # If whitelist is empty, allow all users
         if not self.whitelist:
             try:
                 self.logger.debug(f"auth check: user={user_id} -> open access (empty whitelist)")
@@ -45,50 +45,50 @@ class UserWhitelist:
         
         if not is_auth:
             self.logger.warning(
-                f"Yetkisiz erişim denemesi: User ID {user_id}"
+                f"Unauthorized access attempt: User ID {user_id}"
             )
         
         return is_auth
     
     def add_user(self, user_id: int) -> None:
         """
-        Whitelist'e user ekler.
+        Adds user to whitelist.
         
         Args:
             user_id: Telegram user ID
         """
         self.whitelist.add(user_id)
-        self.logger.info(f"User ID {user_id} whitelist'e eklendi")
+        self.logger.info(f"User ID {user_id} added to whitelist")
     
     def remove_user(self, user_id: int) -> None:
         """
-        Whitelist'den user çıkarır.
+        Removes user from whitelist.
         
         Args:
             user_id: Telegram user ID
         """
         self.whitelist.discard(user_id)
-        self.logger.info(f"User ID {user_id} whitelist'den çıkarıldı")
+        self.logger.info(f"User ID {user_id} removed from whitelist")
     
     def get_whitelist(self) -> List[int]:
         """
-        Whitelist'i döndürür.
+        Returns whitelist.
         
         Returns:
-            Yetkili user ID listesi
+            List of authorized user IDs
         """
         return list(self.whitelist)
     
     def get_unauthorized_message(self) -> str:
         """
-        Yetkisiz kullanıcı mesajı.
+        Unauthorized user message.
         
         Returns:
-            Türkçe hata mesajı
+            Error message
         """
         return (
-            "⛔ Yetkisiz Erişim\n\n"
-            "Bu botu kullanma yetkiniz bulunmamaktadır.\n"
-            "Erişim için bot yöneticisiyle iletişime geçiniz."
+            "⛔ Unauthorized Access\n\n"
+            "You are not authorized to use this bot.\n"
+            "Please contact the bot administrator for access."
         )
 

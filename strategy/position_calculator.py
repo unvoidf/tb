@@ -1,6 +1,6 @@
 """
-PositionCalculator: Pozisyon hesaplama sınıfı.
-Fibonacci ve ATR bazlı giriş, stop-loss ve take-profit seviyeleri.
+PositionCalculator: Position calculation class.
+Fibonacci and ATR based entry, stop-loss and take-profit levels.
 """
 import pandas as pd
 from typing import Dict, Optional
@@ -10,14 +10,14 @@ from utils.logger import LoggerManager
 
 
 class PositionCalculator:
-    """Pozisyon seviyelerini hesaplar."""
+    """Calculates position levels."""
     
     def __init__(self, fib_calculator: FibonacciCalculator):
         """
-        PositionCalculator'ı başlatır.
+        Initializes PositionCalculator.
         
         Args:
-            fib_calculator: Fibonacci hesaplayıcı
+            fib_calculator: Fibonacci calculator
         """
         self.fib_calc = fib_calculator
         self.logger = LoggerManager().get_logger('PositionCalculator')
@@ -28,15 +28,15 @@ class PositionCalculator:
         atr: float
     ) -> Optional[Dict]:
         """
-        Pozisyon seviyelerini hesaplar.
+        Calculates position levels.
         
         Args:
             df: OHLCV DataFrame
-            signal: Sinyal bilgisi
-            atr: ATR değeri
+            signal: Signal info
+            atr: ATR value
             
         Returns:
-            Pozisyon seviyesi dict
+            Position level dict
         """
         direction = signal['direction']
         
@@ -58,18 +58,18 @@ class PositionCalculator:
                 atr=atr
             )
         
-        # Fibonacci bazlı seviyeler
+        # Fibonacci based levels
         fib_entry = self.fib_calc.suggest_entry_levels(df, direction)
         self.logger.debug(f"fib_entry: {fib_entry}")
         
         if not fib_entry:
-            # Fallback: ATR bazlı hesaplama
+            # Fallback: ATR based calculation
             self.logger.debug(f"fib_entry missing -> fallback ATR: atr={atr}")
             return self._calculate_atr_based_position(
                 current_price, atr, direction
             )
         
-        # Giriş seviyesi ve durum
+        # Entry level and status
         entry, entry_status = self._determine_entry_price(
             current_price, fib_entry['entry'], direction
         )
@@ -81,7 +81,7 @@ class PositionCalculator:
         )
         self.logger.debug(f"stop_loss: {stop_loss} (atr={atr}, fib_sl={fib_entry['stop_loss']})")
         
-        # Take-profit seviyeleri
+        # Take-profit levels
         targets = self.fib_calc.calculate_targets(
             entry, stop_loss, direction
         )
@@ -104,40 +104,40 @@ class PositionCalculator:
         self, current: float, fib_entry: float, direction: str
     ) -> tuple[float, str]:
         """
-        Giriş fiyatını belirler ve durum mesajı döndürür.
+        Determines entry price and returns status message.
         
         Args:
-            current: Mevcut fiyat
-            fib_entry: Fibonacci giriş seviyesi
-            direction: Pozisyon yönü
+            current: Current price
+            fib_entry: Fibonacci entry level
+            direction: Position direction
             
         Returns:
-            (Giriş fiyatı, durum mesajı) tuple
+            (Entry price, status message) tuple
         """
-        # Eğer fiyat zaten ideal seviyeye yakınsa
+        # If price is already close to ideal level
         distance = abs(current - fib_entry) / current
         
-        if distance < 0.02:  # %2'den yakınsa
+        if distance < 0.02:  # Closer than 2%
             return current, "OPTIMAL"
         
-        # Fiyatın yönünü kontrol et
+        # Check price direction
         if direction == 'LONG':
             price_moved_ahead = current > fib_entry
         else:  # SHORT
             price_moved_ahead = current < fib_entry
         
-        # Fiyat hedef yönünde hareket etmişse
+        # If price moved in target direction
         if price_moved_ahead:
-            # %5'ten fazla kaçmışsa kesinlikle güncel fiyat
+            # If moved more than 5%, definitely current price
             if distance > 0.05:
                 return current, "PRICE_MOVED"
-            # %2-5 arası da kaçmış sayılır
+            # Between 2-5% is also considered moved
             else:
                 return current, "PRICE_MOVED"
         
-        # Fiyat ters yönde veya henüz hareketsiz
+        # Price in opposite direction or not moved yet
         else:
-            # Düzeltme beklenebilir
+            # Pullback expected
             if distance > 0.05:
                 return fib_entry, "WAIT_FOR_PULLBACK"
             else:
@@ -148,24 +148,24 @@ class PositionCalculator:
         fib_sl: float, direction: str
     ) -> float:
         """
-        Stop-loss seviyesini hesaplar (ATR ve Fibonacci kombinasyonu).
+        Calculates stop-loss level (ATR and Fibonacci combination).
         
         Args:
-            entry: Giriş fiyatı
-            atr: ATR değeri
+            entry: Entry price
+            atr: ATR value
             fib_sl: Fibonacci stop-loss
-            direction: Pozisyon yönü
+            direction: Position direction
             
         Returns:
-            Stop-loss seviyesi
+            Stop-loss level
         """
-        # ATR bazlı stop-loss (SL_MULTIPLIER x ATR)
+        # ATR based stop-loss (SL_MULTIPLIER x ATR)
         if direction == 'LONG':
             atr_sl = entry - (SL_MULTIPLIER * atr)
         else:
             atr_sl = entry + (SL_MULTIPLIER * atr)
         
-        # Fibonacci ve ATR'den daha sıkı olanı kullan
+        # Use tighter one from Fibonacci and ATR
         if direction == 'LONG':
             return max(atr_sl, fib_sl)
         else:
@@ -175,15 +175,15 @@ class PositionCalculator:
         self, price: float, atr: float, direction: str
     ) -> Dict:
         """
-        Fallback: Sadece ATR bazlı pozisyon hesaplama.
+        Fallback: Only ATR based position calculation.
         
         Args:
-            price: Mevcut fiyat
-            atr: ATR değeri
-            direction: Pozisyon yönü
+            price: Current price
+            atr: ATR value
+            direction: Position direction
             
         Returns:
-            Pozisyon seviyesi dict
+            Position level dict
         """
         entry = price
         
@@ -225,7 +225,7 @@ class PositionCalculator:
         atr: float
     ) -> Dict:
         """
-        Ranging stratejisi için custom TP/SL seviyeleriyle pozisyon oluşturur.
+        Creates position with custom TP/SL levels for Ranging strategy.
         """
         stop_info = custom_targets.get('stop_loss', {})
         stop_price = stop_info.get('price')
@@ -270,7 +270,7 @@ class PositionCalculator:
         direction: str,
         custom_targets: Dict[str, Dict[str, float]]
     ) -> list:
-        """Custom target dict'inden hedef listesi oluşturur."""
+        """Creates target list from custom target dict."""
         targets = []
         
         for key in ['tp1', 'tp2', 'tp3']:
@@ -299,7 +299,7 @@ class PositionCalculator:
         target_price: float,
         direction: str
     ) -> float:
-        """Risk/ödül oranını hesaplar."""
+        """Calculates risk/reward ratio."""
         if direction == 'LONG':
             risk = entry - stop_loss
             reward = target_price - entry
@@ -320,18 +320,18 @@ class PositionCalculator:
         sl_levels: Dict
     ) -> Dict:
         """
-        R-based distances hesaplar (SL2'ye göre normalize edilmiş).
+        Calculates R-based distances (normalized relative to SL2).
         
         Args:
-            signal_price: Sinyal fiyatı
-            direction: LONG veya SHORT
+            signal_price: Signal price
+            direction: LONG or SHORT
             tp_levels: {'tp1': price, 'tp2': price, 'tp3': price}
             sl_levels: {'sl1': price, 'sl2': price, 'sl3': price}
             
         Returns:
             {'tp1_r': float, 'tp2_r': float, 'tp3_r': float, 'sl1_r': float, 'sl2_r': float}
         """
-        # Risk = SL2 mesafesi
+        # Risk = SL2 distance
         sl2_price = sl_levels.get('sl2', sl_levels.get('sl1', signal_price))
         risk = abs(signal_price - sl2_price)
         
@@ -340,7 +340,7 @@ class PositionCalculator:
         
         result = {}
         
-        # TP R mesafeleri
+        # TP R distances
         for level in ['tp1', 'tp2', 'tp3']:
             tp_price = tp_levels.get(level)
             if tp_price is not None:
@@ -352,7 +352,7 @@ class PositionCalculator:
             else:
                 result[f'{level}_r'] = 0
         
-        # SL R mesafeleri (negatif)
+        # SL R distances (negative)
         for level in ['sl1', 'sl2']:
             sl_price = sl_levels.get(level)
             if sl_price is not None:

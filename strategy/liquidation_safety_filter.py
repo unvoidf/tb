@@ -1,9 +1,9 @@
 """
 Liquidation Safety Filter
 -------------------------
-Hızlı liquidation risk kontrolü için utility fonksiyonları.
-Bir sinyal için farklı risk/kaldıraç kombinasyonlarını test eder ve
-SL ile liquidation arasında çok az fark olanları filtreler.
+Utility functions for fast liquidation risk control.
+Tests different risk/leverage combinations for a signal and
+filters those with very small difference between SL and liquidation.
 """
 import os
 from typing import List, Dict, Tuple, Optional
@@ -12,15 +12,15 @@ from utils.logger import LoggerManager
 
 
 class LiquidationSafetyFilter:
-    """Liquidation risk kontrolü için filtre."""
+    """Filter for liquidation risk control."""
     
     def __init__(self, mmr: float = 0.004, min_sl_liq_buffer: Optional[float] = None):
         """
-        LiquidationSafetyFilter'ı başlatır.
+        Initializes LiquidationSafetyFilter.
         
         Args:
             mmr: Maintenance Margin Rate (default: 0.004 = 0.4%)
-            min_sl_liq_buffer: SL ile liquidation arası minimum buffer (default: .env'den okunur veya 0.01 = %1)
+            min_sl_liq_buffer: Minimum buffer between SL and liquidation (default: reads from .env or 0.01 = 1%)
         """
         self.mmr = mmr
         self.min_sl_liq_buffer = min_sl_liq_buffer or self._load_min_sl_liq_buffer()
@@ -36,24 +36,24 @@ class LiquidationSafetyFilter:
         leverage_ranges: List[int]
     ) -> Tuple[List[Dict], List[Dict]]:
         """
-        Risk/kaldıraç kombinasyonlarını test eder ve güvenli olanları döndürür.
+        Tests risk/leverage combinations and returns safe ones.
         
         Args:
-            entry_price: Entry fiyatı
-            sl_price: Stop loss fiyatı
-            direction: LONG veya SHORT
-            balance: Hesap bakiyesi
-            risk_ranges: Test edilecek risk oranları listesi (örn: [0.5, 1.0, 1.5, ...])
-            leverage_ranges: Test edilecek kaldıraç değerleri listesi (örn: [1, 2, 3, ...])
+            entry_price: Entry price
+            sl_price: Stop loss price
+            direction: LONG or SHORT
+            balance: Account balance
+            risk_ranges: List of risk percentages to test (e.g. [0.5, 1.0, 1.5, ...])
+            leverage_ranges: List of leverage values to test (e.g. [1, 2, 3, ...])
             
         Returns:
             (safe_combinations, unsafe_combinations) tuple
-            Her kombinasyon: {'risk': float, 'leverage': int, 'liq_price': float, 'sl_liq_diff_pct': float}
+            Each combination: {'risk': float, 'leverage': int, 'liq_price': float, 'sl_liq_diff_pct': float}
         """
         safe_combinations = []
         unsafe_combinations = []
         
-        # SL mesafesi
+        # SL distance
         sl_distance_pct = abs(entry_price - sl_price) / entry_price
         if sl_distance_pct == 0:
             self.logger.warning("SL distance is 0, cannot calculate liquidation")
@@ -61,13 +61,13 @@ class LiquidationSafetyFilter:
         
         for risk_percent in risk_ranges:
             for leverage in leverage_ranges:
-                # Pozisyon büyüklüğü hesapla
+                # Calculate position size
                 risk_amount = balance * (risk_percent / 100)
                 position_size_usd = risk_amount / sl_distance_pct
                 margin_required = position_size_usd / leverage
                 quantity = position_size_usd / entry_price
                 
-                # Liquidation price hesapla
+                # Calculate liquidation price
                 liq_price = calculate_liquidation_price(
                     direction=direction,
                     entry_price=entry_price,
@@ -79,10 +79,10 @@ class LiquidationSafetyFilter:
                 if liq_price <= 0:
                     continue
                 
-                # SL ile liquidation arasındaki farkı hesapla
+                # Calculate difference between SL and liquidation
                 if direction == 'LONG':
                     # LONG: SL < Entry, Liq < Entry
-                    # SL ile Liq arasındaki fark
+                    # Difference between SL and Liq
                     sl_liq_diff = abs(sl_price - liq_price)
                     sl_liq_diff_pct = (sl_liq_diff / entry_price) * 100
                 else:
@@ -99,7 +99,7 @@ class LiquidationSafetyFilter:
                     'position_size_usd': position_size_usd
                 }
                 
-                # Buffer kontrolü: SL ile liquidation arasında minimum %1 fark olmalı
+                # Buffer check: There must be at least 1% difference between SL and liquidation
                 if sl_liq_diff_pct < (self.min_sl_liq_buffer * 100):
                     unsafe_combinations.append(combination)
                     self.logger.debug(
@@ -121,18 +121,18 @@ class LiquidationSafetyFilter:
         leverage_ranges: Optional[List[int]] = None
     ) -> Optional[Dict]:
         """
-        Güvenli kombinasyonlar arasından en iyisini bulur.
+        Finds the best among safe combinations.
         
         Args:
-            entry_price: Entry fiyatı
-            sl_price: Stop loss fiyatı
-            direction: LONG veya SHORT
-            balance: Hesap bakiyesi
-            risk_ranges: Test edilecek risk oranları (default: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
-            leverage_ranges: Test edilecek kaldıraç değerleri (default: [1, 2, 3, 4, 5, 7, 10])
+            entry_price: Entry price
+            sl_price: Stop loss price
+            direction: LONG or SHORT
+            balance: Account balance
+            risk_ranges: Risk percentages to test (default: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
+            leverage_ranges: Leverage values to test (default: [1, 2, 3, 4, 5, 7, 10])
             
         Returns:
-            En iyi güvenli kombinasyon veya None
+            Best safe combination or None
         """
         if risk_ranges is None:
             # Load from .env or use defaults
@@ -158,8 +158,8 @@ class LiquidationSafetyFilter:
             )
             return None
         
-        # En iyi kombinasyonu seç: En yüksek leverage, en yüksek risk (ama güvenli)
-        # Öncelik: SL-Liq farkı yeterince büyük olanlar, sonra yüksek leverage
+        # Select best combination: Highest leverage, highest risk (but safe)
+        # Priority: Those with large enough SL-Liq difference, then high leverage
         best = max(
             safe_combinations,
             key=lambda x: (x['sl_liq_diff_pct'], x['leverage'], x['risk'])
@@ -182,18 +182,18 @@ class LiquidationSafetyFilter:
         leverage_ranges: Optional[List[int]] = None
     ) -> float:
         """
-        Likidite risk yüzdesini hesaplar.
+        Calculates liquidation risk percentage.
         
         Args:
-            entry_price: Entry fiyatı
-            sl_price: Stop loss fiyatı
-            direction: LONG veya SHORT
-            balance: Hesap bakiyesi
-            risk_ranges: Test edilecek risk oranları (default: .env'den okunur)
-            leverage_ranges: Test edilecek kaldıraç değerleri (default: .env'den okunur)
+            entry_price: Entry price
+            sl_price: Stop loss price
+            direction: LONG or SHORT
+            balance: Account balance
+            risk_ranges: Risk percentages to test (default: reads from .env)
+            leverage_ranges: Leverage values to test (default: reads from .env)
             
         Returns:
-            Likidite risk yüzdesi (0-100 arası): (Unsafe kombinasyonlar / Tüm kombinasyonlar) * 100
+            Liquidation risk percentage (0-100): (Unsafe combinations / All combinations) * 100
         """
         if risk_ranges is None:
             risk_ranges = self._load_risk_ranges()

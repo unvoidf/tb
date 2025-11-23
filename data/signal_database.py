@@ -1,6 +1,6 @@
 """
-SignalDatabase: SQLite veritabanı yönetimi.
-Sinyal takip sistemi için veritabanı bağlantısı ve şema oluşturma.
+SignalDatabase: SQLite database management.
+Database connection and schema creation for signal tracking system.
 """
 import sqlite3
 import os
@@ -11,53 +11,53 @@ from utils.logger import LoggerManager
 
 
 class SignalDatabase:
-    """SQLite veritabanı yönetimi."""
+    """SQLite database management."""
     
     def __init__(self, db_path: str = "data/signals.db"):
         """
-        SignalDatabase'i başlatır.
+        Initializes SignalDatabase.
         
         Args:
-            db_path: Veritabanı dosya yolu
+            db_path: Database file path
         """
         self.db_path = db_path
         self.logger = LoggerManager().get_logger('SignalDatabase')
         self._lock = threading.RLock()
         self._connection: Optional[sqlite3.Connection] = None
         
-        # data/ klasörünü oluştur
+        # Create data/ directory
         db_dir = os.path.dirname(db_path)
         if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)
-            self.logger.info(f"Veritabanı klasörü oluşturuldu: {db_dir}")
+            self.logger.info(f"Database directory created: {db_dir}")
         
-        # Veritabanı bağlantısı ve tablo oluşturma
+        # Database connection and table creation
         self._initialize_database()
     
     def _get_persistent_connection(self) -> sqlite3.Connection:
         """
-        Persistent bağlantıyı döndürür veya oluşturur.
-        Thread-safe değildir, caller lock almalı.
+        Returns or creates persistent connection.
+        Not thread-safe, caller must acquire lock.
         """
         if self._connection is None:
             try:
-                # check_same_thread=False: Farklı thread'lerden erişime izin ver (lock ile koruyacağız)
+                # check_same_thread=False: Allow access from different threads (protected by lock)
                 self._connection = sqlite3.connect(self.db_path, check_same_thread=False)
                 self._connection.row_factory = sqlite3.Row
-                # WAL mode performans ve concurrency için iyidir
+                # WAL mode is good for performance and concurrency
                 self._connection.execute("PRAGMA journal_mode=WAL;")
             except Exception as e:
-                self.logger.error(f"Veritabanı bağlantı hatası: {str(e)}", exc_info=True)
+                self.logger.error(f"Database connection error: {str(e)}", exc_info=True)
                 raise
         return self._connection
 
     def _initialize_database(self) -> None:
-        """Veritabanını initialize eder ve tabloları oluşturur."""
+        """Initializes database and creates tables."""
         try:
             with self.get_db_context() as conn:
                 cursor = conn.cursor()
                 
-                # signals tablosunu oluştur
+                # Create signals table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS signals (
                         signal_id TEXT PRIMARY KEY,
@@ -94,59 +94,59 @@ class SignalDatabase:
                     )
                 """)
                 
-                # Migration: Eğer message_deleted kolonu yoksa ekle
+                # Migration: Add message_deleted column if not exists
                 try:
                     cursor.execute("ALTER TABLE signals ADD COLUMN message_deleted INTEGER DEFAULT 0")
-                    self.logger.info("message_deleted kolonu eklendi (migration)")
+                    self.logger.info("message_deleted column added (migration)")
                 except sqlite3.OperationalError:
                     pass
                 
-                # Migration: Eğer signal_log kolonu yoksa ekle
+                # Migration: Add signal_log column if not exists
                 try:
                     cursor.execute("ALTER TABLE signals ADD COLUMN signal_log TEXT")
-                    self.logger.info("signal_log kolonu eklendi (migration)")
+                    self.logger.info("signal_log column added (migration)")
                 except sqlite3.OperationalError:
                     pass
                 
-                # Migration: MFE/MAE tracking kolonları
+                # Migration: MFE/MAE tracking columns
                 for col in ['mfe_price REAL', 'mfe_at INTEGER', 'mae_price REAL', 'mae_at INTEGER', 'final_price REAL', 'final_outcome TEXT']:
                     try:
                         cursor.execute(f"ALTER TABLE signals ADD COLUMN {col}")
-                        self.logger.info(f"{col.split()[0]} kolonu eklendi (migration)")
+                        self.logger.info(f"{col.split()[0]} column added (migration)")
                     except sqlite3.OperationalError:
                         pass
                 
-                # Migration: Score breakdown kolonu
+                # Migration: Score breakdown column
                 try:
                     cursor.execute("ALTER TABLE signals ADD COLUMN signal_score_breakdown TEXT")
-                    self.logger.info("signal_score_breakdown kolonu eklendi (migration)")
+                    self.logger.info("signal_score_breakdown column added (migration)")
                 except sqlite3.OperationalError:
                     pass
                 
-                # Migration: Market context kolonu
+                # Migration: Market context column
                 try:
                     cursor.execute("ALTER TABLE signals ADD COLUMN market_context TEXT")
-                    self.logger.info("market_context kolonu eklendi (migration)")
+                    self.logger.info("market_context column added (migration)")
                 except sqlite3.OperationalError:
                     pass
                 
-                # Migration: R-based distances kolonları
+                # Migration: R-based distances columns
                 for col in ['tp1_distance_r REAL', 'tp2_distance_r REAL', 'tp3_distance_r REAL', 'sl1_distance_r REAL', 'sl2_distance_r REAL']:
                     try:
                         cursor.execute(f"ALTER TABLE signals ADD COLUMN {col}")
-                        self.logger.info(f"{col.split()[0]} kolonu eklendi (migration)")
+                        self.logger.info(f"{col.split()[0]} column added (migration)")
                     except sqlite3.OperationalError:
                         pass
                 
-                # Migration: Alternative entry kolonları
+                # Migration: Alternative entry columns
                 for col in ['optimal_entry_price REAL', 'conservative_entry_price REAL', 'optimal_entry_hit INTEGER DEFAULT 0', 'optimal_entry_hit_at INTEGER', 'conservative_entry_hit INTEGER DEFAULT 0', 'conservative_entry_hit_at INTEGER']:
                     try:
                         cursor.execute(f"ALTER TABLE signals ADD COLUMN {col}")
-                        self.logger.info(f"{col.split()[0]} kolonu eklendi (migration)")
+                        self.logger.info(f"{col.split()[0]} column added (migration)")
                     except sqlite3.OperationalError:
                         pass
                 
-                # signal_price_snapshots tablosu
+                # signal_price_snapshots table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS signal_price_snapshots (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -160,7 +160,7 @@ class SignalDatabase:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_signal_id ON signal_price_snapshots(signal_id)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON signal_price_snapshots(timestamp)")
                 
-                # rejected_signals tablosu
+                # rejected_signals table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS rejected_signals (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -177,7 +177,7 @@ class SignalDatabase:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_rejected_symbol ON rejected_signals(symbol)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_rejected_created_at ON rejected_signals(created_at)")
                 
-                # signal_metrics_summary tablosu
+                # signal_metrics_summary table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS signal_metrics_summary (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,7 +201,7 @@ class SignalDatabase:
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_summary_period ON signal_metrics_summary(period_start, period_end)")
                 
-                # İndeksler oluştur
+                # Create indexes
                 cursor.execute("""
                     CREATE INDEX IF NOT EXISTS idx_symbol ON signals(symbol)
                 """)
@@ -217,31 +217,31 @@ class SignalDatabase:
                 
                 conn.commit()
                 
-                self.logger.info(f"Veritabanı initialize edildi: {self.db_path}")
+                self.logger.info(f"Database initialized: {self.db_path}")
             
         except Exception as e:
-            self.logger.error(f"Veritabanı initialize hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Database initialization error: {str(e)}", exc_info=True)
             raise
     
     def get_connection(self) -> sqlite3.Connection:
         """
-        Legacy support: Yeni bir bağlantı döndürür.
-        NOT: Bu metod her çağrıldığında yeni connection açar.
-        Optimize edilmiş kullanım için get_db_context() kullanın.
+        Legacy support: Returns a new connection.
+        NOTE: This method opens a new connection every time it is called.
+        Use get_db_context() for optimized usage.
         """
         try:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             return conn
         except Exception as e:
-            self.logger.error(f"Veritabanı bağlantı hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Database connection error: {str(e)}", exc_info=True)
             raise
 
     @contextlib.contextmanager
     def get_db_context(self) -> Generator[sqlite3.Connection, None, None]:
         """
-        Thread-safe veritabanı bağlantısı context manager.
-        Persistent connection ve lock kullanır.
+        Thread-safe database connection context manager.
+        Uses persistent connection and lock.
         
         Usage:
             with db.get_db_context() as conn:
@@ -251,18 +251,18 @@ class SignalDatabase:
         with self._lock:
             conn = self._get_persistent_connection()
             yield conn
-            # Commit/Rollback caller sorumluluğunda olabilir ama
-            # genelde repository içinde commit yapılıyor.
-            # Burada connection'ı KAPATMIYORUZ.
+            # Commit/Rollback might be caller's responsibility but
+            # usually commit is done within repository.
+            # We do NOT close the connection here.
     
     def close(self) -> None:
-        """Veritabanı bağlantısını kapatır."""
+        """Closes database connection."""
         with self._lock:
             if self._connection:
                 try:
                     self._connection.close()
                     self._connection = None
-                    self.logger.info("Veritabanı bağlantısı kapatıldı.")
+                    self.logger.info("Database connection closed.")
                 except Exception as e:
-                    self.logger.error(f"Veritabanı kapatma hatası: {str(e)}", exc_info=True)
+                    self.logger.error(f"Database closing error: {str(e)}", exc_info=True)
 

@@ -1,6 +1,6 @@
 """
-TelegramBotManager: Telegram bot yönetim sınıfı.
-Bot başlatma, komut routing ve hata yönetimi.
+TelegramBotManager: Telegram bot management class.
+Bot initialization, command routing and error management.
 """
 import asyncio
 from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -13,15 +13,15 @@ from utils.logger import LoggerManager
 
 
 class TelegramBotManager:
-    """Telegram bot'u yönetir."""
+    """Manages Telegram bot."""
     
     def __init__(self, token: str, reminder_manager=None):
         """
-        TelegramBotManager'ı başlatır.
+        Initializes TelegramBotManager.
         
         Args:
             token: Telegram bot token
-            reminder_manager: Forecast reminder manager (opsiyonel)
+            reminder_manager: Forecast reminder manager (optional)
         """
         self.token = token
         self.reminder_manager = reminder_manager
@@ -37,27 +37,27 @@ class TelegramBotManager:
         self, update: object, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         """
-        Global hata handler.
+        Global error handler.
         
         Args:
             update: Telegram update
             context: Bot context
         """
         self.logger.error(
-            f"Bot hatası: {context.error}", 
+            f"Bot error: {context.error}", 
             exc_info=context.error
         )
         
         try:
             if isinstance(update, Update) and update.message:
                 await update.message.reply_text(
-                    "❌ Bir hata oluştu. Lütfen daha sonra tekrar deneyin."
+                    "❌ An error occurred. Please try again later."
                 )
         except Exception as e:
-            self.logger.error(f"Error handler'da hata: {e}", exc_info=True)
+            self.logger.error(f"Error in error handler: {e}", exc_info=True)
     
     def setup_handlers(self) -> None:
-        """Bot handler'larını yapılandırır."""
+        """Configures bot handlers."""
         self.logger.debug("Setting up Telegram handlers")
         # Callback query handler for signal updates
         self.application.add_handler(
@@ -77,13 +77,13 @@ class TelegramBotManager:
                     if self._forecast_cache:
                         stats = self._forecast_cache.get_cache_stats()
                     msg = (
-                        "✅ Bot başlatıldı\n"
+                        "✅ Bot started\n"
                         f"🧠 Cache: size={stats['size']}, oldest={stats['oldest_age_sec']}s, newest={stats['newest_age_sec']}s"
                     )
                     await app.bot.send_message(chat_id=self._channel_id, text=msg)
-                    self.logger.info("Kanal mesajı gönderildi (post_init)")
+                    self.logger.info("Channel message sent (post_init)")
             except Exception as e:
-                self.logger.error(f"post_init kanal mesajı hatası: {e}")
+                self.logger.error(f"post_init channel message error: {e}")
 
         async def _on_post_shutdown(app: Application) -> None:
             try:
@@ -92,21 +92,21 @@ class TelegramBotManager:
                     if self._forecast_cache:
                         stats = self._forecast_cache.get_cache_stats()
                     msg = (
-                        "🛑 Bot kapatıldı\n"
+                        "🛑 Bot stopped\n"
                         f"🧠 Cache: size={stats['size']}, oldest={stats['oldest_age_sec']}s, newest={stats['newest_age_sec']}s"
                     )
                     await app.bot.send_message(chat_id=self._channel_id, text=msg)
-                    self.logger.info("Kanal mesajı gönderildi (post_shutdown)")
+                    self.logger.info("Channel message sent (post_shutdown)")
             except Exception as e:
-                # Bot kapatılırken HTTP bağlantısı zaten kapatılmış olabilir - bu normal
+                # HTTP connection might be closed when bot is shutting down - this is normal
                 if "HTTPXRequest" in str(e) or "not initialized" in str(e):
-                    self.logger.debug(f"Post-shutdown mesajı gönderilemedi (bot zaten kapatılmış): {e}")
+                    self.logger.debug(f"Post-shutdown message could not be sent (bot already closed): {e}")
                 else:
-                    self.logger.error(f"post_shutdown kanal mesajı hatası: {e}")
+                    self.logger.error(f"post_shutdown channel message error: {e}")
             finally:
                 self._loop = None
 
-        # PTB v20+: post_init/post_shutdown callback'ları assign edilmelidir
+        # PTB v20+: post_init/post_shutdown callbacks must be assigned
         self.application.post_init = _on_post_init
         self.application.post_shutdown = _on_post_shutdown
     
@@ -114,105 +114,105 @@ class TelegramBotManager:
         self, channel_id: str, message: str, reply_markup=None
     ) -> Optional[int]:
         """
-        Kanala mesaj gönderir.
+        Sends message to channel.
         
         Args:
-            channel_id: Telegram kanal ID
-            message: Gönderilecek mesaj
-            reply_markup: Inline keyboard markup (opsiyonel)
+            channel_id: Telegram channel ID
+            message: Message to send
+            reply_markup: Inline keyboard markup (optional)
             
         Returns:
-            Telegram message_id veya None
+            Telegram message_id or None
         """
         try:
             kwargs = {
                 'chat_id': channel_id,
                 'text': message,
-                'parse_mode': 'MarkdownV2'  # MarkdownV2 formatını kullan
+                'parse_mode': 'MarkdownV2'  # Use MarkdownV2 format
             }
             if reply_markup:
                 kwargs['reply_markup'] = reply_markup
                 
             sent_message = await self.application.bot.send_message(**kwargs)
             message_id = sent_message.message_id
-            self.logger.info(f"Kanal mesajı gönderildi - Message ID: {message_id}")
+            self.logger.info(f"Channel message sent - Message ID: {message_id}")
             return message_id
         except Exception as e:
             error_msg = str(e).lower()
-            # Markdown parse hatası kontrolü
+            # Markdown parse error check
             if "can't parse entities" in error_msg or "bad request" in error_msg:
                 self.logger.warning(
                     f"Markdown parse hatası, mesaj plain text olarak gönderilecek: {str(e)}"
                 )
                 # Plain text olarak tekrar dene
                 try:
-                    kwargs['parse_mode'] = None  # Parse mode'u kaldır
+                    kwargs['parse_mode'] = None  # Remove parse mode
                     sent_message = await self.application.bot.send_message(**kwargs)
                     message_id = sent_message.message_id
-                    self.logger.info(f"Kanal mesajı plain text olarak gönderildi - Message ID: {message_id}")
+                    self.logger.info(f"Channel message sent as plain text - Message ID: {message_id}")
                     return message_id
                 except Exception as retry_error:
                     self.logger.error(
-                        f"Plain text kanal mesajı gönderme hatası: {str(retry_error)}",
+                        f"Plain text channel message sending error: {str(retry_error)}",
                         exc_info=True
                     )
                     return None
             else:
                 self.logger.error(
-                    f"Kanal mesajı gönderilemedi: {str(e)}",
+                    f"Channel message could not be sent: {str(e)}",
                     exc_info=True
                 )
                 return None
 
     def send_channel_message(self, channel_id: str, message: str, reply_markup=None) -> Optional[int]:
         """
-        Kanala mesaj gönderir (sync wrapper).
+        Sends message to channel (sync wrapper).
         
         Args:
-            channel_id: Telegram kanal ID
-            message: Gönderilecek mesaj
-            reply_markup: Inline keyboard markup (opsiyonel)
+            channel_id: Telegram channel ID
+            message: Message to send
+            reply_markup: Inline keyboard markup (optional)
             
         Returns:
-            Telegram message_id veya None
+            Telegram message_id or None
         """
         try:
             if not self.application:
-                self.logger.error("Bot application henüz initialize edilmemiş (channel)")
+                self.logger.error("Bot application not initialized yet (channel)")
                 return None
             result = self._run_on_bot_loop(
                 self.send_message_to_channel(channel_id, message, reply_markup)
             )
             return result
         except Exception as e:
-            self.logger.error(f"Channel mesajı gönderilemedi (sync): {str(e)}", exc_info=True)
+            self.logger.error(f"Channel message could not be sent (sync): {str(e)}", exc_info=True)
             return None
     
     async def edit_message_to_channel(
         self, channel_id: str, message_id: int, message: str, reply_markup=None
     ) -> tuple[bool, bool]:
         """
-        Kanal mesajını düzenler.
+        Edits channel message.
         
         Args:
-            channel_id: Telegram kanal ID
-            message_id: Düzenlenecek mesaj ID
-            message: Yeni mesaj içeriği
-            reply_markup: Inline keyboard markup (opsiyonel, None ise mevcut keyboard korunur)
+            channel_id: Telegram channel ID
+            message_id: Message ID to edit
+            message: New message content
+            reply_markup: Inline keyboard markup (optional, if None keeps current keyboard)
             
         Returns:
             (success: bool, message_not_found: bool)
-            - success: True ise başarılı
-            - message_not_found: True ise mesaj bulunamadı (silinmiş)
+            - success: True if successful
+            - message_not_found: True if message not found (deleted)
         """
         try:
-            # Eğer reply_markup None ise, mevcut mesajdan keyboard'u al
+            # If reply_markup is None, get keyboard from current message
             if reply_markup is None:
                 try:
                     current_message = await self.application.bot.get_chat(chat_id=channel_id)
-                    # get_chat ile mesaj alınamaz, get_message kullanmalıyız
-                    # Ama channel için get_message yok, bu yüzden None bırakıyoruz
-                    # Telegram otomatik olarak mevcut keyboard'u korur
+                    # Cannot get message with get_chat, must use get_message
+                    # But get_message is not available for channel, so we leave it None
+                    # Telegram automatically preserves current keyboard
                 except Exception:
                     pass
             
@@ -220,52 +220,52 @@ class TelegramBotManager:
                 'chat_id': channel_id,
                 'message_id': message_id,
                 'text': message,
-                'parse_mode': 'MarkdownV2'  # MarkdownV2 formatını kullan
+                'parse_mode': 'MarkdownV2'  # Use MarkdownV2 format
             }
-            # reply_markup None ise, Telegram otomatik olarak mevcut keyboard'u korur
-            # Explicit olarak None göndermek yerine, parametreyi hiç göndermeyiz
+            # If reply_markup is None, Telegram automatically preserves current keyboard
+            # Instead of sending explicit None, we don't send the parameter at all
             if reply_markup is not None:
                 kwargs['reply_markup'] = reply_markup
                 
             try:
                 await self.application.bot.edit_message_text(**kwargs)
-                self.logger.info(f"Kanal mesajı güncellendi - Message ID: {message_id}")
+                self.logger.info(f"Channel message updated - Message ID: {message_id}")
                 return (True, False)
             except Exception as e:
-                # "Message is not modified" hatası normaldir (içerik değişmediyse)
+                # "Message is not modified" error is normal (if content didn't change)
                 if "Message is not modified" in str(e):
-                    self.logger.debug(f"Mesaj içeriği aynı, güncelleme atlandı: {message_id}")
-                    return (True, False)  # Başarılı say
-                raise e  # Diğer hataları yukarı fırlat (parse error handling için)
+                    self.logger.debug(f"Message content same, update skipped: {message_id}")
+                    return (True, False)  # Count as success
+                raise e  # Raise other errors (for parse error handling)
         except Exception as parse_error:
             error_msg = str(parse_error).lower()
-            # Markdown parse hatası kontrolü
+            # Markdown parse error check
             if "can't parse entities" in error_msg or "bad request" in error_msg:
                 self.logger.warning(
-                    f"Markdown parse hatası, mesaj plain text olarak güncellenecek: {str(parse_error)}"
+                    f"Markdown parse error, message will be updated as plain text: {str(parse_error)}"
                 )
-                # Plain text olarak tekrar dene
+                # Retry as plain text
                 try:
-                    kwargs['parse_mode'] = None  # Parse mode'u kaldır
+                    kwargs['parse_mode'] = None  # Remove parse mode
                     await self.application.bot.edit_message_text(**kwargs)
-                    self.logger.info(f"Kanal mesajı plain text olarak güncellendi - Message ID: {message_id}")
+                    self.logger.info(f"Channel message updated as plain text - Message ID: {message_id}")
                     return (True, False)
                 except Exception as retry_error:
                     self.logger.error(
-                        f"Plain text kanal mesajı güncelleme hatası: {str(retry_error)}",
+                        f"Plain text channel message update error: {str(retry_error)}",
                         exc_info=True
                     )
                     return (False, False)
-            # RetryAfter hatası için ayrı işlem
+            # Separate handling for RetryAfter error
             if isinstance(parse_error, RetryAfter):
-                raise  # RetryAfter'ı yukarı fırlat
-            # Diğer hatalar için normal işlem
+                raise  # Raise RetryAfter
+            # Normal handling for other errors
             raise
         except RetryAfter as e:
-            # Flood control: Telegram'ın belirttiği süreyi bekle ve tekrar dene
+            # Flood control: Wait for Telegram's specified time and retry
             retry_after = e.retry_after
             self.logger.warning(
-                f"Telegram flood control: {retry_after} saniye bekleniyor - Message ID: {message_id}"
+                f"Telegram flood control: Waiting {retry_after} seconds - Message ID: {message_id}"
             )
             await asyncio.sleep(retry_after)
             try:
@@ -273,22 +273,22 @@ class TelegramBotManager:
                     'chat_id': channel_id,
                     'message_id': message_id,
                     'text': message,
-                    'parse_mode': 'MarkdownV2'  # MarkdownV2 formatını kullan
+                    'parse_mode': 'MarkdownV2'  # Use MarkdownV2 format
                 }
                 if reply_markup is not None:
                     kwargs['reply_markup'] = reply_markup
                     
                 await self.application.bot.edit_message_text(**kwargs)
-                self.logger.info(f"Kanal mesajı güncellendi (retry sonrası) - Message ID: {message_id}")
+                self.logger.info(f"Channel message updated (after retry) - Message ID: {message_id}")
                 return (True, False)
             except Exception as retry_error:
                 error_msg = str(retry_error).lower()
-                # Markdown parse hatası kontrolü
+                # Markdown parse error check
                 if "can't parse entities" in error_msg or "bad request" in error_msg:
                     try:
                         kwargs['parse_mode'] = None
                         await self.application.bot.edit_message_text(**kwargs)
-                        self.logger.info(f"Kanal mesajı plain text olarak güncellendi (retry sonrası) - Message ID: {message_id}")
+                        self.logger.info(f"Channel message updated as plain text (after retry) - Message ID: {message_id}")
                         return (True, False)
                     except Exception:
                         pass  # Fall through to message_not_found check
@@ -298,19 +298,19 @@ class TelegramBotManager:
                 )
                 if is_message_not_found:
                     self.logger.warning(
-                        f"Telegram mesajı bulunamadı (retry sonrası): Message ID: {message_id}"
+                        f"Telegram message not found (after retry): Message ID: {message_id}"
                     )
                     return (False, True)
                 else:
                     self.logger.error(
-                        f"Kanal mesajı güncellenemedi (retry sonrası): {str(retry_error)}",
+                        f"Channel message could not be updated (after retry): {str(retry_error)}",
                         exc_info=True
                     )
                     return (False, False)
         except TimedOut:
-            # Timeout: 2 saniye bekle ve 1 kez daha dene
+            # Timeout: Wait 2 seconds and retry once
             self.logger.warning(
-                f"Telegram timeout - 2 saniye beklenip tekrar denenecek - Message ID: {message_id}"
+                f"Telegram timeout - waiting 2 seconds and retrying - Message ID: {message_id}"
             )
             await asyncio.sleep(2)
             try:
@@ -318,22 +318,22 @@ class TelegramBotManager:
                     'chat_id': channel_id,
                     'message_id': message_id,
                     'text': message,
-                    'parse_mode': 'MarkdownV2'  # MarkdownV2 formatını kullan
+                    'parse_mode': 'MarkdownV2'  # Use MarkdownV2 format
                 }
                 if reply_markup is not None:
                     kwargs['reply_markup'] = reply_markup
                     
                 await self.application.bot.edit_message_text(**kwargs)
-                self.logger.info(f"Kanal mesajı güncellendi (timeout retry sonrası) - Message ID: {message_id}")
+                self.logger.info(f"Channel message updated (after timeout retry) - Message ID: {message_id}")
                 return (True, False)
             except Exception as retry_error:
                 error_msg = str(retry_error).lower()
-                # Markdown parse hatası kontrolü
+                # Markdown parse error check
                 if "can't parse entities" in error_msg or "bad request" in error_msg:
                     try:
                         kwargs['parse_mode'] = None
                         await self.application.bot.edit_message_text(**kwargs)
-                        self.logger.info(f"Kanal mesajı plain text olarak güncellendi (timeout retry sonrası) - Message ID: {message_id}")
+                        self.logger.info(f"Channel message updated as plain text (after timeout retry) - Message ID: {message_id}")
                         return (True, False)
                     except Exception:
                         pass  # Fall through to message_not_found check
@@ -343,20 +343,20 @@ class TelegramBotManager:
                 )
                 if is_message_not_found:
                     self.logger.warning(
-                        f"Telegram mesajı bulunamadı (timeout retry sonrası): Message ID: {message_id}"
+                        f"Telegram message not found (after timeout retry): Message ID: {message_id}"
                     )
                     return (False, True)
                 else:
-                    # Timeout retry sonrası hala başarısız, ama mesaj silinmiş sayma
-                    # Çünkü gerçek sorun ağ olabilir
+                    # Still failed after timeout retry, but don't count as deleted
+                    # Because real issue might be network
                     self.logger.error(
-                        f"Kanal mesajı güncellenemedi (timeout retry sonrası): {str(retry_error)}",
+                        f"Channel message could not be updated (after timeout retry): {str(retry_error)}",
                         exc_info=True
                     )
                     return (False, False)
         except Exception as e:
             error_message = str(e).lower()
-            # "Message to edit not found" hatasını kontrol et
+            # Check "Message to edit not found" error
             is_message_not_found = (
                 "message to edit not found" in error_message or
                 "message not found" in error_message
@@ -364,11 +364,11 @@ class TelegramBotManager:
             
             if is_message_not_found:
                 self.logger.warning(
-                    f"Telegram mesajı bulunamadı (silinmiş olabilir): Message ID: {message_id}"
+                    f"Telegram message not found (might be deleted): Message ID: {message_id}"
                 )
             else:
                 self.logger.error(
-                    f"Kanal mesajı güncellenemedi: {str(e)}",
+                    f"Channel message could not be updated: {str(e)}",
                     exc_info=True
                 )
             return (False, is_message_not_found)
@@ -377,48 +377,48 @@ class TelegramBotManager:
         self, channel_id: str, message_id: int, message: str, reply_markup=None
     ) -> tuple[bool, bool]:
         """
-        Kanal mesajını düzenler (sync wrapper).
+        Edits channel message (sync wrapper).
         
         Args:
-            channel_id: Telegram kanal ID
-            message_id: Düzenlenecek mesaj ID
-            message: Yeni mesaj içeriği
-            reply_markup: Inline keyboard markup (opsiyonel, None ise mevcut keyboard korunur)
+            channel_id: Telegram channel ID
+            message_id: Message ID to edit
+            message: New message content
+            reply_markup: Inline keyboard markup (optional, if None keeps current keyboard)
             
         Returns:
             (success: bool, message_not_found: bool)
-            - success: True ise başarılı
-            - message_not_found: True ise mesaj bulunamadı (silinmiş)
+            - success: True if successful
+            - message_not_found: True if message not found (deleted)
         """
         try:
             if not self.application:
-                self.logger.error("Bot application henüz initialize edilmemiş (edit channel)")
+                self.logger.error("Bot application not initialized yet (edit channel)")
                 return (False, False)
             result = self._run_on_bot_loop(
                 self.edit_message_to_channel(channel_id, message_id, message, reply_markup)
             )
             if isinstance(result, tuple) and len(result) == 2:
                 return result
-            # Eski format için fallback
+            # Fallback for old format
             return (bool(result), False)
         except Exception as e:
-            self.logger.error(f"Channel mesajı düzenlenemedi (sync): {str(e)}", exc_info=True)
+            self.logger.error(f"Channel message could not be edited (sync): {str(e)}", exc_info=True)
             return (False, False)
     
     def send_message(
         self, chat_id: int, text: str, reply_to_message_id: int = None
     ) -> None:
         """
-        Kullanıcıya mesaj gönderir (sync wrapper).
+        Sends message to user (sync wrapper).
         
         Args:
             chat_id: Chat ID
-            text: Gönderilecek mesaj
-            reply_to_message_id: Reply edilecek mesaj ID'si (opsiyonel)
+            text: Message to send
+            reply_to_message_id: Message ID to reply to (optional)
         """
         try:
             if not self.application:
-                self.logger.error("Bot application henüz initialize edilmemiş")
+                self.logger.error("Bot application not initialized yet")
                 return
             self._run_on_bot_loop(
                 self._send_message_async(chat_id, text, reply_to_message_id),
@@ -426,7 +426,7 @@ class TelegramBotManager:
             )
         except Exception as e:
             self.logger.error(
-                f"Mesaj gönderilemedi: {str(e)}",
+                f"Message could not be sent: {str(e)}",
                 exc_info=True
             )
     
@@ -434,52 +434,52 @@ class TelegramBotManager:
         self, chat_id: int, text: str, reply_to_message_id: int = None
     ) -> None:
         """
-        Async mesaj gönderme fonksiyonu.
+        Async message sending function.
         
         Args:
             chat_id: Chat ID
-            text: Gönderilecek mesaj
-            reply_to_message_id: Reply edilecek mesaj ID'si (opsiyonel)
+            text: Message to send
+            reply_to_message_id: Message ID to reply to (optional)
         """
         try:
             kwargs = {
                 'chat_id': chat_id,
                 'text': text,
-                'parse_mode': 'MarkdownV2'  # MarkdownV2 formatını kullan
+                'parse_mode': 'MarkdownV2'  # Use MarkdownV2 format
             }
             if reply_to_message_id:
                 kwargs['reply_to_message_id'] = reply_to_message_id
             self.logger.debug(f"send_message kwargs: {kwargs | {'text': f'<{len(text)} chars>'}}")
                 
             await self.application.bot.send_message(**kwargs)
-            self.logger.info(f"Mesaj gönderildi - Chat: {chat_id}")
+            self.logger.info(f"Message sent - Chat: {chat_id}")
         except Exception as e:
             error_msg = str(e).lower()
-            # Markdown parse hatası kontrolü
+            # Markdown parse error check
             if "can't parse entities" in error_msg or "bad request" in error_msg:
                 self.logger.warning(
                     f"Markdown parse hatası, mesaj plain text olarak gönderilecek: {str(e)}"
                 )
                 # Plain text olarak tekrar dene
                 try:
-                    kwargs['parse_mode'] = None  # Parse mode'u kaldır
+                    kwargs['parse_mode'] = None  # Remove parse mode
                     await self.application.bot.send_message(**kwargs)
-                    self.logger.info(f"Mesaj plain text olarak gönderildi - Chat: {chat_id}")
+                    self.logger.info(f"Message sent as plain text - Chat: {chat_id}")
                 except Exception as retry_error:
                     self.logger.error(
-                        f"Plain text mesaj gönderme hatası: {str(retry_error)}",
+                        f"Plain text message sending error: {str(retry_error)}",
                         exc_info=True
                     )
             else:
                 self.logger.error(
-                    f"Async mesaj gönderme hatası: {str(e)}",
+                    f"Async message sending error: {str(e)}",
                     exc_info=True
                 )
     
     def _run_on_bot_loop(self, coro, return_result: bool = True):
-        """Bot'un event loop'u üzerinde güvenli şekilde coroutine çalıştırır."""
+        """Runs coroutine safely on bot's event loop."""
         if not self._loop or not self._loop.is_running():
-            self.logger.error("Telegram bot event loop'u hazır değil veya çalışmıyor")
+            self.logger.error("Telegram bot event loop is not ready or not running")
             return None
 
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
@@ -490,28 +490,28 @@ class TelegramBotManager:
         try:
             return future.result()
         except FuturesTimeoutError:
-            self.logger.error("Telegram bot loop çağrısı zaman aşımına uğradı")
+            self.logger.error("Telegram bot loop call timed out")
             return None
         except Exception as exc:
             self.logger.error(
-                f"Telegram bot loop çağrısı başarısız: {exc}",
+                f"Telegram bot loop call failed: {exc}",
                 exc_info=True
             )
             return None
 
     def initialize(self) -> None:
-        """Bot'u initialize eder."""
+        """Initializes the bot."""
         self.application = Application.builder().token(self.token).build()
         self.setup_handlers()
-        self.logger.info("Telegram bot initialize edildi")
+        self.logger.info("Telegram bot initialized")
 
     def configure_lifecycle_notifications(self, channel_id: str, forecast_cache) -> None:
-        """Kanal ID ve cache referansı vererek lifecycle bildirimlerini etkinleştirir."""
+        """Enables lifecycle notifications by providing channel ID and cache reference."""
         self._channel_id = channel_id
         self._forecast_cache = forecast_cache
     
     def set_signal_tracker(self, signal_tracker) -> None:
-        """SignalTracker instance'ını set eder (callback handler için)."""
+        """Sets SignalTracker instance (for callback handler)."""
         self._signal_tracker = signal_tracker
     
     async def handle_signal_update_callback(self, update, context) -> None:
@@ -528,77 +528,77 @@ class TelegramBotManager:
             if not query:
                 return
             
-            # callback_data parse et: "update_signal:{signal_id}"
+            # Parse callback_data: "update_signal:{signal_id}"
             callback_data = query.data
             if not callback_data or not callback_data.startswith("update_signal:"):
-                self.logger.warning(f"Geçersiz callback_data: {callback_data}")
-                await query.answer("❌ Geçersiz istek", show_alert=True)
+                self.logger.warning(f"Invalid callback_data: {callback_data}")
+                await query.answer("❌ Invalid request", show_alert=True)
                 return
             
             signal_id = callback_data.replace("update_signal:", "")
             if not signal_id:
-                self.logger.warning("Sinyal ID bulunamadı")
-                await query.answer("❌ Sinyal ID bulunamadı", show_alert=True)
+                self.logger.warning("Signal ID not found")
+                await query.answer("❌ Signal ID not found", show_alert=True)
                 return
             
             self.logger.info(f"Signal update callback: {signal_id}")
             
-            # SignalTracker instance'ına erişim sağla
+            # Access SignalTracker instance
             signal_tracker = getattr(self, '_signal_tracker', None)
             if not signal_tracker:
-                self.logger.error("SignalTracker instance'ına erişilemedi")
-                await query.answer("❌ Hata: SignalTracker bulunamadı", show_alert=True)
+                self.logger.error("Could not access SignalTracker instance")
+                await query.answer("❌ Error: SignalTracker not found", show_alert=True)
                 return
             
-            # ÖNEMLİ: Callback query'ye HEMEN yanıt ver (Telegram timeout'u önlemek için)
-            # Telegram'ın callback query timeout'u çok kısa, bu yüzden önce yanıt veriyoruz
+            # IMPORTANT: Answer callback query IMMEDIATELY (to prevent Telegram timeout)
+            # Telegram's callback query timeout is very short, so we answer first
             try:
-                await query.answer("⏳ Güncelleniyor...")
+                await query.answer("⏳ Updating...")
             except Exception as e:
-                # "Query is too old" hatası normaldir (restart sonrası eski butonlara basılırsa)
-                # Bu hatayı logla ama işlemi durdurma (update devam etsin)
+                # "Query is too old" error is normal (if old buttons are clicked after restart)
+                # Log this error but don't stop execution (continue update)
                 if "Query is too old" in str(e):
-                    self.logger.warning(f"Callback query zaman aşımı (normal): {str(e)}")
+                    self.logger.warning(f"Callback query timeout (normal): {str(e)}")
                 else:
-                    self.logger.warning(f"Callback query yanıt hatası: {str(e)}")
+                    self.logger.warning(f"Callback query answer error: {str(e)}")
             
-            # Sinyali veritabanından al
+            # Get signal from database
             signal = signal_tracker.repository.get_signal(signal_id)
             if not signal:
-                self.logger.warning(f"Sinyal bulunamadı: {signal_id}")
-                # Query'ye zaten yanıt verdik, sadece log
+                self.logger.warning(f"Signal not found: {signal_id}")
+                # We already answered the query, just log
                 return
             
-            # Mesajı güncelle (sync metod, thread'de çalıştır - non-blocking)
-            # update_message_for_signal sync bir metod, bu yüzden thread'de çalıştırmalıyız
+            # Update message (sync method, run in thread - non-blocking)
+            # update_message_for_signal is a sync method, so we must run it in a thread
             import threading
             def update_signal():
                 try:
                     signal_tracker.update_message_for_signal(signal)
-                    self.logger.info(f"Signal update tamamlandı: {signal_id}")
+                    self.logger.info(f"Signal update completed: {signal_id}")
                 except Exception as e:
-                    self.logger.error(f"Signal update hatası: {str(e)}", exc_info=True)
+                    self.logger.error(f"Signal update error: {str(e)}", exc_info=True)
             
-            # Thread'de çalıştır (non-blocking, daemon thread)
+            # Run in thread (non-blocking, daemon thread)
             thread = threading.Thread(target=update_signal, daemon=True)
             thread.start()
-            # join() yapmıyoruz, arka planda çalışsın - callback query'ye zaten yanıt verdik
+            # We don't join(), let it run in background - we already answered the callback query
             
         except Exception as e:
             self.logger.error(
-                f"Signal update callback hatası: {str(e)}",
+                f"Signal update callback error: {str(e)}",
                 exc_info=True
             )
             if query:
                 try:
-                    await query.answer("❌ Güncelleme hatası", show_alert=True)
+                    await query.answer("❌ Update error", show_alert=True)
                 except Exception:
                     pass
     
     def run(self) -> None:
-        """Bot'u başlatır (blocking)."""
+        """Starts the bot (blocking)."""
         if not self.application:
             self.initialize()
         
-        self.logger.info("Telegram bot başlatılıyor...")
+        self.logger.info("Starting Telegram bot...")
         self.application.run_polling(allowed_updates=Update.ALL_TYPES)

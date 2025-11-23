@@ -1,6 +1,6 @@
 """
-Main Application: TrendBot ana giriş noktası.
-ApplicationFactory pattern ile tüm bileşenleri initialize eder.
+Main Application: TrendBot main entry point.
+Initializes all components using the ApplicationFactory pattern.
 """
 import signal
 import sys
@@ -10,16 +10,16 @@ from utils.logger import LoggerManager
 
 
 class TrendBot:
-    """Ana uygulama sınıfı."""
+    """Main application class."""
     
     def __init__(self):
-        """TrendBot'u başlatır."""
+        """Initializes TrendBot."""
         self.components = None
         self.logger = None
         self._setup_signal_handlers()
     
     def _setup_signal_handlers(self) -> None:
-        """Signal handler'ları ayarlar."""
+        """Sets up signal handlers."""
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
     
@@ -28,78 +28,78 @@ class TrendBot:
         Signal handler.
         
         Args:
-            signum: Signal numarası
-            frame: Frame objesi
+            signum: Signal number
+            frame: Frame object
         """
         if self.logger:
-            self.logger.info(f"Signal {signum} alındı, uygulama kapatılıyor...")
+            self.logger.info(f"Signal {signum} received, shutting down application...")
         
         self.shutdown()
         sys.exit(0)
     
     def initialize(self) -> None:
-        """Tüm bileşenleri initialize eder."""
-        print("🚀 TrendBot başlatılıyor...")
+        """Initializes all components."""
+        print("🚀 Starting TrendBot...")
         
         try:
-            # ApplicationFactory ile bileşenleri oluştur
+            # Create components with ApplicationFactory
             factory = ApplicationFactory()
             self.components = factory.create_application()
             
-            # Logger'ı al
+            # Get Logger
             self.logger = self.components['logger']
             
             self.logger.info("=" * 50)
-            self.logger.info("TrendBot başlatılıyor")
+            self.logger.info("Starting TrendBot")
             self.logger.info("=" * 50)
             
-            # Bot'u initialize et
+            # Initialize Bot
             self.components['telegram_bot'].initialize()
             
-            # Scheduler'ı başlat
+            # Start Scheduler
             self.components['scheduler'].start()
             
-            # Signal scanner scheduler'ı başlat
+            # Start Signal scanner scheduler
             self.components['signal_scanner_scheduler'].start()
             
-            # Signal tracker scheduler'ı başlat
+            # Start Signal tracker scheduler
             self.components['signal_tracker_scheduler'].start()
             
-            self.logger.info("Tüm bileşenler başarıyla initialize edildi")
+            self.logger.info("All components initialized successfully")
             
         except Exception as e:
-            error_msg = f"Uygulama başlatma hatası: {str(e)}"
+            error_msg = f"Application initialization error: {str(e)}"
             print(f"❌ {error_msg}")
             if self.logger:
                 self.logger.error(error_msg, exc_info=True)
             raise TrendBotException(error_msg)
     
     def run(self) -> None:
-        """Bot'u çalıştırır."""
+        """Runs the bot."""
         if not self.components:
-            raise TrendBotException("Uygulama initialize edilmemiş")
+            raise TrendBotException("Application not initialized")
         
         try:
-            self.logger.info("TrendBot çalıştırılıyor...")
+            self.logger.info("Running TrendBot...")
             self.components['telegram_bot'].run()
         except KeyboardInterrupt:
-            self.logger.info("Kullanıcı tarafından durduruldu")
+            self.logger.info("Stopped by user")
         except Exception as e:
-            error_msg = f"Bot çalıştırma hatası: {str(e)}"
+            error_msg = f"Bot execution error: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
             raise TrendBotException(error_msg)
         finally:
             self.shutdown()
     
     def shutdown(self) -> None:
-        """Uygulamayı güvenli şekilde kapatır."""
-        # Pre-shutdown kanal bildirimi (event loop kapanmadan önce)
+        """Safely shuts down the application."""
+        # Pre-shutdown channel notification (before event loop closes)
         try:
             if self.components and 'config' in self.components:
                 ch_id = self.components['config'].telegram_channel_id
-                msg = "🛑 Bot kapatılıyor"
+                msg = "🛑 Bot is shutting down"
                 self.logger.info(msg)
-                # PTB kapanmış olabilir; doğrudan Telegram HTTP API ile gönder
+                # PTB might be closed; send directly via Telegram HTTP API
                 try:
                     import json as _json, urllib.request as _urlreq
                     token = self.components['config'].telegram_token
@@ -108,55 +108,55 @@ class TrendBot:
                     req = _urlreq.Request(api_url, data=payload, headers={'Content-Type': 'application/json'})
                     _urlreq.urlopen(req, timeout=5)
                     if self.logger:
-                        self.logger.info("Kanal mesajı gönderildi (pre-shutdown, direct API)")
+                        self.logger.info("Channel message sent (pre-shutdown, direct API)")
                 except Exception as http_err:
                     if self.logger:
-                        self.logger.error(f"Pre-shutdown direct API hatası: {http_err}")
+                        self.logger.error(f"Pre-shutdown direct API error: {http_err}")
         except Exception as e:
             if self.logger:
-                self.logger.error(f"Pre-shutdown mesajı gönderilemedi: {str(e)}", exc_info=True)
+                self.logger.error(f"Could not send pre-shutdown message: {str(e)}", exc_info=True)
         if self.components and 'scheduler' in self.components:
             try:
                 self.components['scheduler'].stop()
                 if self.logger:
-                    self.logger.info("Scheduler durduruldu")
+                    self.logger.info("Scheduler stopped")
             except Exception as e:
                 if self.logger:
-                    self.logger.error(f"Scheduler durdurma hatası: {str(e)}")
+                    self.logger.error(f"Scheduler stop error: {str(e)}")
         
         if self.components and 'signal_scanner_scheduler' in self.components:
             try:
                 self.components['signal_scanner_scheduler'].stop()
                 if self.logger:
-                    self.logger.info("Signal scanner scheduler durduruldu")
+                    self.logger.info("Signal scanner scheduler stopped")
             except Exception as e:
                 if self.logger:
-                    self.logger.error(f"Signal scanner scheduler durdurma hatası: {str(e)}")
+                    self.logger.error(f"Signal scanner scheduler stop error: {str(e)}")
         
         if self.components and 'signal_tracker_scheduler' in self.components:
             try:
                 self.components['signal_tracker_scheduler'].stop()
                 if self.logger:
-                    self.logger.info("Signal tracker scheduler durduruldu")
+                    self.logger.info("Signal tracker scheduler stopped")
             except Exception as e:
                 if self.logger:
-                    self.logger.error(f"Signal tracker scheduler durdurma hatası: {str(e)}")
+                    self.logger.error(f"Signal tracker scheduler stop error: {str(e)}")
         
         if self.logger:
-            self.logger.info("TrendBot kapatıldı")
+            self.logger.info("TrendBot shut down")
 
 
 def main():
-    """Ana fonksiyon."""
+    """Main function."""
     try:
         bot = TrendBot()
         bot.initialize()
         bot.run()
     except TrendBotException as e:
-        print(f"❌ TrendBot Hatası: {e.message}")
+        print(f"❌ TrendBot Error: {e.message}")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Beklenmeyen Hata: {str(e)}")
+        print(f"❌ Unexpected Error: {str(e)}")
         sys.exit(1)
 
 

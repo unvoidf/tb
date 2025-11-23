@@ -1,6 +1,6 @@
 """
-BaseFormatter: Temel formatlama utility'leri.
-Markdown escape ve timestamp formatlama fonksiyonları.
+BaseFormatter: Basic formatting utilities.
+Markdown escape and timestamp formatting functions.
 """
 import os
 import time
@@ -10,7 +10,7 @@ from utils.logger import LoggerManager
 
 
 class BaseFormatter:
-    """Temel formatlama işlevlerini sağlar."""
+    """Provides basic formatting functions."""
     
     def __init__(self):
         self.logger = LoggerManager().get_logger('BaseFormatter')
@@ -18,29 +18,29 @@ class BaseFormatter:
     @staticmethod
     def escape_markdown_v2(text: str) -> str:
         """
-        Telegram MarkdownV2 için özel karakterleri escape eder.
+        Escapes special characters for Telegram MarkdownV2.
         
-        MarkdownV2'de escape edilmesi GEREKEN karakterler (sadece bunlar):
+        Characters that MUST be escaped in MarkdownV2 (only these):
         _ * [ ] ( ) ~ ` 
         
-        Not: Diğer karakterler (+, -, =, |, {, }, ., !, >, #) normal metinde 
-        escape edilmemeli, sadece özel bağlamlarda gerekli.
+        Note: Other characters (+, -, =, |, {, }, ., !, >, #) should not be 
+        escaped in normal text, only required in specific contexts.
         
         Args:
-            text: Escape edilecek metin
+            text: Text to escape
             
         Returns:
-            Escape edilmiş metin
+            Escaped text
         """
         if not text:
             return text
         
-        # MarkdownV2'de MUTLAKA escape edilmesi gereken karakterler
-        # Sadece bu karakterler escape edilmeli
-        # Not: () parantezler sadece link formatında kullanılıyor, normal metinde escape edilmemeli
+        # Characters that MUST be escaped in MarkdownV2
+        # Only these characters should be escaped
+        # Note: () parentheses are only used in link format, should not be escaped in normal text
         special_chars = ['_', '*', '[', ']', '~', '`']
         
-        # Her özel karakteri escape et
+        # Escape each special character
         escaped = text
         for char in special_chars:
             escaped = escaped.replace(char, f'\\{char}')
@@ -53,14 +53,14 @@ class BaseFormatter:
         special_chars: Optional[List[str]] = None
     ) -> str:
         """
-        MarkdownV2 formatında belirtilen karakterleri escape eder.
+        Escapes specified characters in MarkdownV2 format.
         
         Args:
-            text: İşlenecek metin
-            special_chars: Escape edilecek özel karakter listesi
+            text: Text to process
+            special_chars: List of special characters to escape
             
         Returns:
-            Escape edilmiş metin
+            Escaped text
         """
         if not text:
             return text
@@ -78,19 +78,19 @@ class BaseFormatter:
     @staticmethod
     def escape_markdown_v2_smart(text: str, preserve_code_blocks: bool = True) -> str:
         """
-        Akıllı Markdown escape: Code block ve bold/italic içindeki karakterleri korur.
+        Smart Markdown escape: Preserves characters inside code blocks and bold/italic.
         
-        Telegram'ın MarkdownV2 formatı için:
-        - *bold* -> korunur (tek yıldız) - ESCAPE EDİLMEZ
-        - _italic_ -> korunur - ESCAPE EDİLMEZ
-        - `code` -> korunur - ESCAPE EDİLMEZ
+        For Telegram's MarkdownV2 format:
+        - *bold* -> preserved (single asterisk) - NOT ESCAPED
+        - _italic_ -> preserved - NOT ESCAPED
+        - `code` -> preserved - NOT ESCAPED
         
         Args:
-            text: Escape edilecek metin
-            preserve_code_blocks: True ise code block içindeki karakterleri escape etmez
+            text: Text to escape
+            preserve_code_blocks: If True, does not escape characters inside code blocks
             
         Returns:
-            Escape edilmiş metin
+            Escaped text
         """
         if not text:
             return text
@@ -100,32 +100,32 @@ class BaseFormatter:
         if not preserve_code_blocks:
             return BaseFormatter.escape_markdown_v2_selective(text)
         
-        # Code block pattern: `...` (backtick ile çevrili)
+        # Code block pattern: `...` (surrounded by backticks)
         parts = []
         last_end = 0
         
-        # Tüm code block'ları bul (backtick ile çevrili)
+        # Find all code blocks (surrounded by backticks)
         pattern = r'`([^`]*)`'
         matches = list(re.finditer(pattern, text))
         
         for match in matches:
-            # Code block öncesi kısmı escape et (bold/italic KORUNARAK)
+            # Escape the part before the code block (PRESERVING bold/italic)
             before = text[last_end:match.start()]
             before_escaped = BaseFormatter.escape_markdown_v2_selective(before)
             parts.append(before_escaped)
             
-            # Code block içeriğini olduğu gibi bırak (ESCAPE ETME!)
-            # Code block içinde özel karakterler (nokta, köşeli parantez vs.) escape edilmemeli
+            # Leave code block content as is (DO NOT ESCAPE!)
+            # Special characters (dot, brackets etc.) inside code block should not be escaped
             code_content = match.group(1)
-            # Code block içeriğini hiç escape etme - Telegram zaten code block içinde parse etmez
+            # Do not escape code block content at all - Telegram does not parse inside code blocks anyway
             parts.append(f'`{code_content}`')
             
             last_end = match.end()
         
-        # Kalan kısmı escape et (bold/italic KORUNARAK)
+        # Escape the remaining part (PRESERVING bold/italic)
         if last_end < len(text):
             remaining = text[last_end:]
-            # Kalan kısımda da code block olabilir, tekrar kontrol et
+            # Remaining part might contain code blocks too, check again
             remaining_escaped = BaseFormatter.escape_markdown_v2_selective(remaining)
             parts.append(remaining_escaped)
         
@@ -134,19 +134,19 @@ class BaseFormatter:
     @staticmethod
     def escape_markdown_v2_selective(text: str) -> str:
         """
-        Seçici Markdown escape: Bold (*) ve italic (_) formatlarını korur,
-        diğer özel karakterleri escape eder.
+        Selective Markdown escape: Preserves Bold (*) and italic (_) formats,
+        escapes other special characters.
         
-        Telegram'ın MarkdownV2 formatında:
-        - *bold* -> korunur (tek yıldız)
-        - _italic_ -> korunur
-        - Diğer özel karakterler escape edilir
+        In Telegram's MarkdownV2 format:
+        - *bold* -> preserved (single asterisk)
+        - _italic_ -> preserved
+        - Other special characters are escaped
         
         Args:
-            text: Escape edilecek metin
+            text: Text to escape
             
         Returns:
-            Escape edilmiş metin
+            Escaped text
         """
         if not text:
             return text
@@ -154,18 +154,18 @@ class BaseFormatter:
         import re
         import uuid
         
-        # Bold ve italic pattern'lerini koru
-        # *text* -> korunur (MarkdownV2 için tek yıldız)
-        # _text_ -> korunur
+        # Preserve bold and italic patterns
+        # *text* -> preserved (single asterisk for MarkdownV2)
+        # _text_ -> preserved
         
-        # Önce bold ve italic pattern'lerini işaretle
-        # Sonra diğer özel karakterleri escape et
-        # En son bold/italic işaretlerini geri getir
+        # First mark bold and italic patterns
+        # Then escape other special characters
+        # Finally restore bold/italic markers
         
-        # Geçici placeholder'lar - benzersiz olmalı
+        # Temporary placeholders - must be unique
         placeholders = {}
         
-        # Bold pattern: *text* (MarkdownV2 için tek yıldız)
+        # Bold pattern: *text* (single asterisk for MarkdownV2)
         def bold_replacer(match):
             unique_id = str(uuid.uuid4())[:8]
             placeholder = f"__BOLD_{unique_id}__"
@@ -174,7 +174,7 @@ class BaseFormatter:
             placeholders[placeholder] = f"*{escaped_content}*"
             return placeholder
         
-        # Italic pattern: _text_ (ama * içinde değilse)
+        # Italic pattern: _text_ (but not inside *)
         def italic_replacer(match):
             unique_id = str(uuid.uuid4())[:8]
             placeholder = f"__ITALIC_{unique_id}__"
@@ -183,26 +183,26 @@ class BaseFormatter:
             placeholders[placeholder] = f"_{escaped_content}_"
             return placeholder
         
-        # Bold'u koru (*text* - tek yıldız, MarkdownV2)
-        # Basit pattern: * ile başlayıp * ile biten (ama ** değil)
+        # Preserve bold (*text* - single asterisk, MarkdownV2)
+        # Simple pattern: starts with * and ends with * (but not **)
         text = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', bold_replacer, text)
         
-        # Italic'i koru (_text_ - alt çizgi)
+        # Preserve italic (_text_ - underscore)
         text = re.sub(r'(?<!_)_([^_\s]+(?:\s+[^_\s]+)*)_(?!_)', italic_replacer, text)
         
-        # Diğer özel karakterleri escape et (bold/italic dışında)
-        # Telegram MarkdownV2 dokümantasyonuna göre:
+        # Escape other special characters (except bold/italic)
+        # According to Telegram MarkdownV2 documentation:
         # "In all other places characters '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!' must be escaped"
-        # NOT: Backtick (`) escape edilmemeli çünkü _escape_markdown_v2_smart fonksiyonu
-        # code block'ları zaten koruyor. Burada escape edersek code block pattern'i bozulur.
-        # Bold/italic pattern'leri placeholder'a çevrildiği için içlerindeki karakterler escape edilmiyor
+        # NOTE: Backtick (`) should not be escaped because _escape_markdown_v2_smart function
+        # already preserves code blocks. If we escape here, code block pattern breaks.
+        # Characters inside bold/italic patterns are not escaped because they are converted to placeholders
         # 
-        # ÖNEMLİ: Telegram dokümantasyonuna TAMAMEN uymalıyız!
-        # Parantezler de dahil tüm özel karakterler escape edilmeli
-        # Placeholder mekanizması sayesinde bold/italic içindeki karakterler korunuyor
+        # IMPORTANT: Must FULLY comply with Telegram documentation!
+        # All special characters including parentheses must be escaped
+        # Characters inside bold/italic are preserved thanks to placeholder mechanism
         text = BaseFormatter.escape_markdown_v2_chars(text)
         
-        # Placeholder'ları geri getir (ters sırada - en son eklenenler önce)
+        # Restore placeholders (in reverse order - last added first)
         for placeholder, original in reversed(list(placeholders.items())):
             text = text.replace(placeholder, original)
         
@@ -210,33 +210,33 @@ class BaseFormatter:
     
     def format_timestamp(self, timestamp: int) -> str:
         """
-        Unix timestamp'i Türkiye saatine (UTC+3) formatlar.
-        TZ environment variable varsa onu kullanır, yoksa varsayılan olarak Europe/Istanbul kullanır.
+        Formats Unix timestamp to Turkey time (UTC+3).
+        Uses TZ environment variable if present, otherwise defaults to Europe/Istanbul.
         
         Args:
-            timestamp: Unix timestamp (saniye, UTC)
+            timestamp: Unix timestamp (seconds, UTC)
             
         Returns:
-            Formatlanmış tarih/saat string (Türkiye saati - UTC+3)
+            Formatted date/time string (Turkey time - UTC+3)
         """
         try:
-            # Unix timestamp'i UTC datetime'a çevir
+            # Convert Unix timestamp to UTC datetime
             dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
             
-            # TZ environment variable kontrolü (esneklik için)
+            # TZ environment variable check (for flexibility)
             tz_name = os.getenv('TZ')
             if not tz_name:
-                # Varsayılan timezone: Türkiye saati (UTC+3)
+                # Default timezone: Turkey time (UTC+3)
                 tz_name = 'Europe/Istanbul'
             
             try:
                 from zoneinfo import ZoneInfo
                 local_dt = dt.astimezone(ZoneInfo(tz_name))
             except ImportError:
-                # zoneinfo modülü yoksa (Python < 3.9) UTC kullan
+                # If zoneinfo module is missing (Python < 3.9), use UTC
                 local_dt = dt
             except Exception:
-                # ZoneInfo hata verirse UTC kullan
+                # If ZoneInfo fails, use UTC
                 local_dt = dt
             
             formatted = local_dt.strftime('%d/%m/%Y %H:%M:%S')
@@ -246,28 +246,28 @@ class BaseFormatter:
                 pass
             return formatted
         except Exception as e:
-            # Son çare: basit datetime formatı (sistem saatine göre)
+            # Last resort: simple datetime format (based on system time)
             try:
                 return datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M:%S')
             except Exception:
-                return "Tarih alınamadı"
+                return "Date unavailable"
     
     def format_timestamp_with_seconds(self, timestamp: Optional[int]) -> str:
-        """Opsiyonel timestamp'i formatlar."""
+        """Formats optional timestamp."""
         if timestamp is None:
             return "-"
         return self.format_timestamp(timestamp)
     
     def format_time_elapsed(self, start_timestamp: Optional[int], end_timestamp: Optional[int]) -> str:
         """
-        İki timestamp arasındaki geçen süreyi human readable formatında döndürür.
+        Returns the time elapsed between two timestamps in human readable format.
         
         Args:
-            start_timestamp: Başlangıç timestamp (saniye)
-            end_timestamp: Bitiş timestamp (saniye, None ise şu anki zaman)
+            start_timestamp: Start timestamp (seconds)
+            end_timestamp: End timestamp (seconds, if None uses current time)
             
         Returns:
-            Human readable zaman farkı (örn: "2 saat 11 dakika", "1 gün 3 saat", "45 dakika")
+            Human readable time difference (e.g., "2 hours 11 minutes", "1 day 3 hours", "45 minutes")
         """
         try:
             if start_timestamp is None:
@@ -281,25 +281,25 @@ class BaseFormatter:
             if elapsed_seconds < 0:
                 return "-"
             
-            # Gün, saat, dakika hesapla
+            # Calculate days, hours, minutes
             days = elapsed_seconds // 86400
             hours = (elapsed_seconds % 86400) // 3600
             minutes = (elapsed_seconds % 3600) // 60
             
-            # Formatla
+            # Format
             parts = []
             if days > 0:
-                parts.append(f"{days} gün" if days == 1 else f"{days} gün")
+                parts.append(f"{days} days" if days != 1 else f"{days} day")
             if hours > 0:
-                parts.append(f"{hours} saat" if hours == 1 else f"{hours} saat")
+                parts.append(f"{hours} hours" if hours != 1 else f"{hours} hour")
             if minutes > 0:
-                parts.append(f"{minutes} dakika" if minutes == 1 else f"{minutes} dakika")
+                parts.append(f"{minutes} minutes" if minutes != 1 else f"{minutes} minute")
             
-            # Eğer hiçbir şey yoksa (çok kısa süre)
+            # If nothing (very short duration)
             if not parts:
                 if elapsed_seconds > 0:
-                    return "1 dakikadan az"
-                return "0 dakika"
+                    return "less than 1 minute"
+                return "0 minutes"
             
             return " ".join(parts)
             
@@ -308,17 +308,17 @@ class BaseFormatter:
 
     def format_price_with_timestamp(self, price: float, timestamp: Optional[int] = None) -> str:
         """
-        Fiyatı tarih/saat bilgisi ile formatlar.
+        Formats price with date/time information.
         
         Args:
-            price: Fiyat
-            timestamp: Unix timestamp (opsiyonel)
+            price: Price
+            timestamp: Unix timestamp (optional)
             
         Returns:
-            Formatlanmış fiyat string
+            Formatted price string
         """
         if price is None:
-            return "💰 Fiyat alınamadı"
+            return "💰 Price unavailable"
         
         price_str = f"💰 ${price:,.4f}"
         
@@ -332,7 +332,7 @@ class BaseFormatter:
             pass
         return price_str
     
-    # Emoji ve string mapping constants
+    # Emoji and string mapping constants
     DIRECTION_EMOJI = {
         'LONG': '📈',
         'SHORT': '📉',
@@ -340,9 +340,9 @@ class BaseFormatter:
     }
     
     DIRECTION_TR = {
-        'LONG': 'LONG (Alış)',
-        'SHORT': 'SHORT (Satış)',
-        'NEUTRAL': 'NEUTRAL (Nötr)'
+        'LONG': 'LONG (Buy)',
+        'SHORT': 'SHORT (Sell)',
+        'NEUTRAL': 'NEUTRAL'
     }
 
     DIRECTION_TITLE = {
@@ -352,8 +352,7 @@ class BaseFormatter:
     }
 
     DIRECTION_FORECAST = {
-        'LONG': 'Yükseliş',
-        'SHORT': 'Düşüş',
-        'NEUTRAL': 'Nötr'
+        'LONG': 'Bullish',
+        'SHORT': 'Bearish',
+        'NEUTRAL': 'Neutral'
     }
-

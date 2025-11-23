@@ -1,4 +1,4 @@
 """
-Core: Temel servisler ve dependency injection.
-Service Container pattern implementasyonu.
+Core: Core services and dependency injection.
+Service Container pattern implementation.
 """
