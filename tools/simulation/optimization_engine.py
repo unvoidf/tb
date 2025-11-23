@@ -232,7 +232,7 @@ class OptimizationEngine:
         min_trades: int, 
         top_n: int
     ) -> None:
-        """Shows default rankings (PnL + Profit Factor)."""
+        """Shows default rankings (PnL + Profit Factor + Max Drawdown)."""
         # 1. Maximum PnL Ranking (primary)
         sorted_pnl = sorted(
             valid_results, 
@@ -279,6 +279,36 @@ class OptimizationEngine:
         print("-" * 90)
         
         for i, res in enumerate(sorted_pf[:top_n]):
+            rank = i + 1
+            pnl_str = f"${res['pnl_amount']:,.2f}"
+            if res['pnl_amount'] > 0:
+                pnl_str = "+" + pnl_str
+            
+            print(
+                f"{rank:<5} | {res['risk']:<4}% | {res['leverage']:<3}x  | "
+                f"{pnl_str:<12} | {res['pnl_percent']:>6.2f}% | "
+                f"{res['max_drawdown']:>6.2f}% | {res['profit_factor']:>4.2f} | "
+                f"{res['risk_adj_return']:>4.2f} | {res['liquidations']:<4}"
+            )
+        
+        print("="*90)
+        
+        # 3. Minimum Max Drawdown Ranking (tertiary - lower is better)
+        sorted_dd = sorted(
+            valid_results, 
+            key=lambda x: x['max_drawdown'], 
+            reverse=False
+        )
+        print("\n" + "="*90)
+        print(f"📉 EN İYİ {top_n} KONFİGÜRASYON (Minimum Max Drawdown) - Min {min_trades} trade")
+        print("="*90)
+        print(
+            f"{'Rank':<5} | {'Risk':<6} | {'Lev':<5} | {'PnL ($)':<12} | "
+            f"{'PnL (%)':<8} | {'MaxDD':<8} | {'PF':<6} | {'R/R':<6} | {'Liq':<4}"
+        )
+        print("-" * 90)
+        
+        for i, res in enumerate(sorted_dd[:top_n]):
             rank = i + 1
             pnl_str = f"${res['pnl_amount']:,.2f}"
             if res['pnl_amount'] > 0:
