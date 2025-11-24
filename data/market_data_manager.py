@@ -332,7 +332,8 @@ class MarketDataManager:
                 symbol
             )
             last = ticker['last']
-            self.logger.debug(f"get_latest_price {symbol} -> {last}")
+            # Note: DEBUG logging removed to reduce log volume (~30% reduction)
+            # Previously logged every price fetch (100+ times/min)
             return last
             
         except Exception as e:

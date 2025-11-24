@@ -176,16 +176,48 @@ class ConfigManager:
     def telegram_channel_id(self) -> str:
         """Returns Telegram channel ID."""
         return os.getenv('TELEGRAM_CHANNEL_ID')
-
+    
     @property
     def confidence_threshold(self) -> float:
         """Signal threshold (.env -> CONFIDENCE_THRESHOLD), else 0.69.
+        
+        DEPRECATED: Use confidence_threshold_long and confidence_threshold_short instead.
+        This property is kept for backwards compatibility.
 
         Example .env:
             CONFIDENCE_THRESHOLD=0.69
         """
         try:
             val = os.getenv('CONFIDENCE_THRESHOLD')
+            return float(val) if val is not None else 0.69
+        except Exception:
+            return 0.69
+    
+    @property
+    def confidence_threshold_long(self) -> float:
+        """LONG signal threshold (.env -> CONFIDENCE_THRESHOLD_LONG), else 0.90.
+        
+        LONG signals require higher confidence due to poor historical performance.
+        Data: LONG 6.67% WR vs SHORT 36.84% WR
+
+        Example .env:
+            CONFIDENCE_THRESHOLD_LONG=0.90
+        """
+        try:
+            val = os.getenv('CONFIDENCE_THRESHOLD_LONG')
+            return float(val) if val is not None else 0.90
+        except Exception:
+            return 0.90
+    
+    @property
+    def confidence_threshold_short(self) -> float:
+        """SHORT signal threshold (.env -> CONFIDENCE_THRESHOLD_SHORT), else 0.69.
+
+        Example .env:
+            CONFIDENCE_THRESHOLD_SHORT=0.69
+        """
+        try:
+            val = os.getenv('CONFIDENCE_THRESHOLD_SHORT')
             return float(val) if val is not None else 0.69
         except Exception:
             return 0.69
@@ -202,6 +234,22 @@ class ConfigManager:
             return int(val) if val is not None else 1
         except Exception:
             return 1
+    
+    @property
+    def min_atr_percent(self) -> float:
+        """Minimum ATR percentage (.env -> MIN_ATR_PERCENT), else 2.0.
+        
+        Signals with ATR below this threshold are rejected to avoid low-volatility
+        false positives. Data shows 51.7% failure rate for ATR <2%.
+
+        Example .env:
+            MIN_ATR_PERCENT=2.0
+        """
+        try:
+            val = os.getenv('MIN_ATR_PERCENT')
+            return float(val) if val is not None else 2.0
+        except Exception:
+            return 2.0
     
     @property
     def signal_tracker_interval_minutes(self) -> int:

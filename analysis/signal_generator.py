@@ -236,7 +236,7 @@ class SignalGenerator:
         
         # Trend modunda klasik pipeline
         signals = self._collect_indicator_signals(indicators, volume)
-        direction, confidence = self._determine_direction(signals)
+        direction, confidence = self._determine_direction(signals, indicators)
         
         market_context = self._create_market_context(
             closed_df, indicators, volume, direction, regime
@@ -314,13 +314,17 @@ class SignalGenerator:
         return signals
     
     def _determine_direction(
-        self, signals: List[str]
+        self, signals: List[str], indicators: Dict = None
     ) -> tuple[str, float]:
         """
         Sinyal listesinden genel yön ve güvenilirlik belirler.
         
+        EXTREME CONSENSUS PENALTY: 100% agreement often indicates trend exhaustion
+        SWEET SPOT BONUS: 67-85% agreement is optimal (4-5 out of 6 indicators)
+        
         Args:
             signals: Gösterge sinyalleri listesi
+            indicators: Teknik göstergeler (RSI kontrolü için)
             
         Returns:
             (direction, confidence) tuple
@@ -333,15 +337,43 @@ class SignalGenerator:
         
         if long_count > short_count and long_count > neutral_count:
             direction = 'LONG'
-            confidence = long_count / total
+            raw_confidence = long_count / total
         elif short_count > long_count and short_count > neutral_count:
             direction = 'SHORT'
-            confidence = short_count / total
+            raw_confidence = short_count / total
         else:
             direction = 'NEUTRAL'
-            confidence = max(long_count, short_count, neutral_count) / total
+            raw_confidence = max(long_count, short_count, neutral_count) / total
+            return direction, raw_confidence
         
-        return direction, confidence
+        # EXTREME CONSENSUS PENALTY (Data: 0.90-0.95 range = 11% win rate)
+        if raw_confidence >= 0.95:  # 6/6 or very high consensus
+            if indicators:
+                rsi_data = indicators.get('rsi', {})
+                rsi_value = rsi_data.get('value', 50)
+                
+                # Check for overbought/oversold extremes (trend exhaustion)
+                if direction == 'LONG' and rsi_value > 75:
+                    raw_confidence *= 0.50  # 50% penalty
+                    self.logger.warning(
+                        f"EXTREME CONSENSUS PENALTY: {direction} with RSI={rsi_value:.1f} "
+                        f"(likely trend exhaustion). Confidence {raw_confidence/0.50:.3f} -> {raw_confidence:.3f}"
+                    )
+                elif direction == 'SHORT' and rsi_value < 25:
+                    raw_confidence *= 0.50  # 50% penalty
+                    self.logger.warning(
+                        f"EXTREME CONSENSUS PENALTY: {direction} with RSI={rsi_value:.1f} "
+                        f"(likely trend exhaustion). Confidence {raw_confidence/0.50:.3f} -> {raw_confidence:.3f}"
+                    )
+        
+        # SWEET SPOT BONUS (Data: 0.75-0.80 range = 51% win rate)
+        elif 0.67 <= raw_confidence <= 0.85:  # 4-5 out of 6 indicators
+            raw_confidence *= 1.10  # 10% bonus to sweet spot
+            self.logger.debug(
+                f"Sweet spot bonus: {raw_confidence/1.10:.3f} -> {raw_confidence:.3f}"
+            )
+        
+        return direction, raw_confidence
     
     def _combine_timeframe_signals(
         self, tf_signals: Dict[str, Dict], multi_tf_data: Dict = None
@@ -411,31 +443,35 @@ class SignalGenerator:
         final_direction = max(weighted_scores, key=weighted_scores.get)
         final_confidence = weighted_scores[final_direction]
         
-        # Confidence Boost (Güven Artırma) - Trend Yönünde ise
-        # Sadece "Perfect Setup" durumunda %90 üstüne çıkabilir.
+        # Confidence Adjustment (REVERSED LOGIC based on data analysis)
+        # Data shows: 0.75-0.80 = 51% WR, 0.90-0.95 = 11% WR
+        # High confidence often indicates trend exhaustion (all indicators overbought)
         if final_direction == daily_trend and is_strong_trend:
-            # Günlük trend ile aynı yöndeyiz ve trend güçlü -> Boost ver
-            boost = 0.15 # %15 Boost
+            # Günlük trend ile aynı yöndeyiz ve trend güçlü
             
-            # Ekstra kontrol: 4h RSI destekliyor mu?
-            tf_4h = tf_signals.get('4h', {})
-            rsi_4h = tf_4h.get('indicators', {}).get('rsi', {}).get('value', 50)
-            
-            rsi_supports = False
-            if final_direction == 'LONG' and 50 < rsi_4h < 70:
-                rsi_supports = True
-            elif final_direction == 'SHORT' and 30 < rsi_4h < 50:
-                rsi_supports = True
+            # HIGH CONFIDENCE = TREND EXHAUSTION RISK
+            if final_confidence >= 0.85:
+                boost = -0.10  # PENALTY instead of bonus
+                self.logger.warning(
+                    f"High confidence penalty applied: {final_confidence:.3f} -> "
+                    f"{final_confidence + boost:.3f} (trend exhaustion risk, ADX={daily_adx:.1f})"
+                )
+            # SWEET SPOT (0.70-0.80) = OPTIMAL RANGE
+            elif 0.70 <= final_confidence <= 0.80:
+                boost = 0.05  # Small bonus to sweet spot
+                self.logger.info(
+                    f"Sweet spot bonus applied: {final_confidence:.3f} -> "
+                    f"{final_confidence + boost:.3f}"
+                )
+            else:
+                boost = 0.0
                 
-            if rsi_supports:
-                boost += 0.05 # %5 daha ekle
-                
-            final_confidence = min(final_confidence + boost, 0.95)
-            self.logger.info(f"Trend Confidence Boost uygulandı: +{boost:.2f}")
+            # Cap at 0.85 (data-driven maximum)
+            final_confidence = max(0.60, min(final_confidence + boost, 0.85))
             
         else:
-            # Trend zayıfsa veya yön belirsizse, confidence %85'i geçemez
-            final_confidence = min(final_confidence, 0.85)
+            # Trend zayıfsa veya yön belirsizse, confidence %75'i geçemez
+            final_confidence = min(final_confidence, 0.75)
 
         # ... (Geri kalan kod aynı) ...
         

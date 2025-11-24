@@ -340,7 +340,7 @@ class ApplicationFactory:
                                      liquidation_safety_filter: LiquidationSafetyFilter,
                                      signal_tracker: Optional[SignalTracker] = None) -> SignalScannerManager:
         """Creates signal scanner manager."""
-        return SignalScannerManager(
+        signal_scanner_manager = SignalScannerManager(
             coin_filter=coin_filter,
             market_data=market_data,
             signal_generator=signal_generator,
@@ -351,11 +351,13 @@ class ApplicationFactory:
             signal_repository=signal_repository,
             confidence_threshold=config.confidence_threshold,  # from .env or default 0.69
             cooldown_hours=config.cooldown_hours,  # from .env or default 1
-            risk_reward_calc=risk_reward_calc,  # Risk/Reward calculator
-            ranging_min_sl_percent=config.ranging_min_sl_percent,
-            liquidation_safety_filter=liquidation_safety_filter,  # Liquidation safety filter
-            signal_tracker=signal_tracker  # SignalTracker instance (optional, for cooldown log updates)
+            ranging_min_sl_percent=config.ranging_min_sl_percent,  # from .env or default 0.5
+            risk_reward_calc=risk_reward_calc,
+            liquidation_safety_filter=liquidation_safety_filter,
+            signal_tracker=signal_tracker,
+            config=config  # Pass config for direction-specific thresholds
         )
+        return signal_scanner_manager
     
     def _create_signal_scanner_scheduler(self, scanner_manager: SignalScannerManager) -> SignalScannerScheduler:
         """Creates signal scanner scheduler."""

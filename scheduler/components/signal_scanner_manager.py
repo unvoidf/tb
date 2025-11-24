@@ -38,7 +38,8 @@ class SignalScannerManager:
         ranging_min_sl_percent: float = 0.5,
         risk_reward_calc: Optional[RiskRewardCalculator] = None,
         liquidation_safety_filter: Optional[LiquidationSafetyFilter] = None,
-        signal_tracker: Optional[object] = None  # SignalTracker instance (optional)
+        signal_tracker: Optional[object] = None,  # SignalTracker instance (optional)
+        config=None  # ConfigManager instance for direction-specific thresholds
     ):
         """
         SignalScannerManager'ı başlatır.
@@ -54,10 +55,9 @@ class SignalScannerManager:
             channel_id: Telegram kanal ID
             signal_repository: Signal repository (opsiyonel, sinyal kaydetme için)
             confidence_threshold: Minimum confidence threshold (default: 0.69 = %69)
-                NOT: Bu değer bir fallback'tir. Gerçek değer config'den (.env -> CONFIDENCE_THRESHOLD)
-                gelir ve bu default değeri override eder. application_factory.py'de
-                config.confidence_threshold kullanılır.
+                DEPRECATED: Use config.confidence_threshold_long/short instead
             cooldown_hours: Cooldown süresi (saat)
+            config: ConfigManager instance (for direction-specific thresholds)
         """
         self.coin_filter = coin_filter
         self.coin_filter = coin_filter
@@ -74,6 +74,7 @@ class SignalScannerManager:
         self.liquidation_safety_filter = liquidation_safety_filter  # Liquidation safety filter
         self.signal_tracker = signal_tracker  # SignalTracker instance (optional, for message updates)
         self.ranging_min_sl_percent = ranging_min_sl_percent
+        self.config = config  # Store config for direction-specific thresholds
         
         self.logger = LoggerManager().get_logger('SignalScannerManager')
         
@@ -83,12 +84,22 @@ class SignalScannerManager:
         # Sinyal cache: {symbol: {last_signal_time, last_direction, confidence}}
         self.signal_cache: Dict[str, Dict] = {}
         
+        # Log startup configuration
         self.logger.info(
             "SignalScannerManager başlatıldı - "
             "threshold=%s, cooldown=%sh, ranging_min_sl=%s%%",
             confidence_threshold,
             cooldown_hours,
             ranging_min_sl_percent,
+        )
+        
+        # Log direction-specific thresholds (from config or defaults)
+        long_threshold = self.config.confidence_threshold_long if self.config else 0.90
+        short_threshold = self.config.confidence_threshold_short if self.config else 0.69
+        self.logger.info(
+            "Direction-Specific Thresholds: LONG=%.2f (%.0f%%), SHORT=%.2f (%.0f%%)",
+            long_threshold, long_threshold * 100,
+            short_threshold, short_threshold * 100
         )
 
         # Hibrit cooldown için cache warmup
@@ -213,11 +224,14 @@ class SignalScannerManager:
                     f"total_score={total_score:.3f}, capped_confidence={capped_confidence:.3f}"
                 )
                 
-                # Total score threshold kontrolü (bonuslar dahil)
-                if total_score < self.confidence_threshold:
-                    # Reddedilme Karnesi (Rejection Scorecard) - Detaylı log
+                # Confidence threshold check (direction-specific)
+                # Data: LONG 6.67% WR vs SHORT 36.84% WR → Different thresholds
+                direction = signal_data.get('direction', 'NEUTRAL')
+                min_threshold = self._get_direction_threshold(direction)
+                
+                if total_score < min_threshold:
                     self._log_rejection_scorecard(
-                        symbol, total_score, self.confidence_threshold,
+                        symbol, total_score, min_threshold,
                         signal_data, ranking_info
                     )
                     if stats: stats['REJECTED_CONFIDENCE'] += 1
@@ -229,16 +243,37 @@ class SignalScannerManager:
                     f"confidence={overall_confidence:.3f} (rank edilemedi)"
                 )
                 
-                # Eski yöntem: sadece confidence kontrolü
-                if overall_confidence < self.confidence_threshold:
-                    # Reddedilme Karnesi (Rejection Scorecard) - Detaylı log
+                # Direction-specific threshold check
+                min_threshold = self._get_direction_threshold(overall_direction)
+                
+                if overall_confidence < min_threshold:
                     self._log_rejection_scorecard(
-                        symbol, overall_confidence, self.confidence_threshold,
+                        symbol, overall_confidence, min_threshold,
                         signal_data, None
                     )
                     if stats: stats['REJECTED_CONFIDENCE'] += 1
                     return
-
+            
+            # ATR Minimum Filter (Data: 51.7% failure for ATR <2%)
+            atr_value = signal_data.get('atr')
+            entry_price = signal_data.get('entry_price') or signal_data.get('signal_price')
+            
+            if atr_value and entry_price:
+                atr_percent = (atr_value / entry_price) * 100
+                min_atr = self.config.min_atr_percent if self.config else 2.0
+                
+                if atr_percent < min_atr:
+                    self.logger.warning(
+                        f"{symbol} rejected: ATR too low ({atr_percent:.2f}% < {min_atr}%). "
+                        f"Low volatility signals are unreliable (51.7% historical failure rate)."
+                    )
+                    if stats: 
+                        if 'REJECTED_LOW_ATR' not in stats:
+                            stats['REJECTED_LOW_ATR'] = 0
+                        stats['REJECTED_LOW_ATR'] += 1
+                    return
+            
+            # Trending market + opposite direction = mismatch
             # NEUTRAL yönlü sinyaller kanala gönderilmez (UX/gürültü kontrolü)
             if overall_direction == 'NEUTRAL':
                 self.logger.debug(
@@ -1108,6 +1143,29 @@ class SignalScannerManager:
             lookback_hours
         )
 
+    def _get_direction_threshold(self, direction: str) -> float:
+        """
+        Returns direction-specific confidence threshold from config.
+        
+        LONG signals require much higher confidence due to poor historical performance.
+        Data analysis shows: LONG 6.67% win rate vs SHORT 36.84% win rate
+        
+        Args:
+            direction: 'LONG', 'SHORT', or 'NEUTRAL'
+        
+        Returns:
+            Minimum confidence threshold (from .env or defaults)
+        """
+        if self.config:
+            if direction == 'LONG':
+                return self.config.confidence_threshold_long
+            return self.config.confidence_threshold_short
+        
+        # Fallback if config not provided
+        if direction == 'LONG':
+            return 0.90
+        return 0.69
+
     def get_cache_stats(self) -> Dict:
         """
         Cache istatistiklerini döndürür.
@@ -1155,10 +1213,11 @@ class SignalScannerManager:
         score: float,
         threshold: float,
         signal_data: Dict,
-        ranking_info: Optional[Dict] = None
+        ranking_info: Optional[Dict] = None,
+        reject_reason: str = None
     ) -> None:
         """
-        Reddedilme Karnesi (Rejection Scorecard) - Detaylı log.
+        Reddedilme Karnesi (Rejection Scorecard) - Kompakt log.
         
         Args:
             symbol: Trading pair
@@ -1166,62 +1225,41 @@ class SignalScannerManager:
             threshold: Minimum eşik değeri
             signal_data: Sinyal verisi (score_breakdown, market_context içerir)
             ranking_info: Ranking bilgileri (opsiyonel)
+            reject_reason: Rejection nedeni (opsiyonel)
         """
         try:
-            score_breakdown = signal_data.get('score_breakdown', {})
             market_context = signal_data.get('market_context', {})
             direction = signal_data.get('direction', 'UNKNOWN')
+            regime = market_context.get('regime', 'unknown')
             
-            # RSI bilgisi
+            # Concise INFO log (1-2 lines)
+            reason_str = f" ({reject_reason})" if reject_reason else ""
+            self.logger.info(
+                f"❌ {symbol} rejected: score={score:.2f} < {threshold:.2f}{reason_str} "
+                f"(dir={direction}, regime={regime})"
+            )
+            
+            # Detailed scorecard only in DEBUG
+            score_breakdown = signal_data.get('score_breakdown', {})
             rsi_value = score_breakdown.get('rsi_value', 0)
             rsi_signal = score_breakdown.get('rsi_signal', 'NEUTRAL')
-            rsi_status = self._get_indicator_status(rsi_signal, direction, rsi_value)
-            
-            # Trend bilgisi
             adx_value = score_breakdown.get('adx_value', 0)
-            adx_signal = score_breakdown.get('adx_signal', 'NEUTRAL')
-            trend_status = self._get_trend_status(adx_signal, direction, adx_value)
-            
-            # Hacim bilgisi
             volume_relative = score_breakdown.get('volume_relative', 1.0)
-            volume_signal = score_breakdown.get('volume_signal', 'NEUTRAL')
-            volume_status = self._get_volume_status(volume_relative, volume_signal)
             
-            # Bonus bilgileri (eğer varsa)
             base_score = ranking_info.get('base_score', score) if ranking_info else score
             rsi_bonus = ranking_info.get('rsi_bonus', 0.0) if ranking_info else 0.0
             volume_bonus = ranking_info.get('volume_bonus', 0.0) if ranking_info else 0.0
             
-            # Log mesajı oluştur
-            log_lines = [
-                f"❌ {symbol} Sinyali Yetersiz (Puan: {score:.2f} / Eşik: {threshold:.2f})",
-                f"📊 Karne:",
-                f"   • Yön: {direction}",
-                f"   • Base Score: {base_score:.3f}",
-            ]
-            
-            if rsi_bonus != 0.0 or volume_bonus != 0.0:
-                log_lines.append(f"   • RSI Bonus: {rsi_bonus:+.3f}")
-                log_lines.append(f"   • Volume Bonus: {volume_bonus:+.3f}")
-            
-            log_lines.extend([
-                f"   • RSI: {rsi_status} (Değer: {rsi_value:.1f})",
-                f"   • Trend: {trend_status} (ADX: {adx_value:.1f})",
-                f"   • Hacim: {volume_status} (Ortalamanın {volume_relative*100:.0f}%)"
-            ])
-            
-            # Market context bilgileri
-            regime = market_context.get('regime', 'unknown')
-            volatility = market_context.get('volatility_percentile', 0)
-            log_lines.append(f"   • Piyasa Rejimi: {regime.upper()}")
-            log_lines.append(f"   • Volatilite: {volatility:.1f}%")
-            
-            self.logger.info("\n".join(log_lines))
+            self.logger.debug(
+                f"{symbol} rejection details: base={base_score:.3f}, rsi_bonus={rsi_bonus:+.3f}, "
+                f"vol_bonus={volume_bonus:+.3f}, RSI={rsi_value:.1f}/{rsi_signal}, "
+                f"ADX={adx_value:.1f}, vol={volume_relative:.2f}x"
+            )
             
         except Exception as e:
-            # Hata durumunda basit log
+            # Fallback to simple log
             self.logger.debug(
-                f"{symbol} confidence düşük: {score:.3f} (scorecard hatası: {str(e)})"
+                f"{symbol} confidence low: {score:.3f} (scorecard error: {str(e)})"
             )
     
     def _get_indicator_status(self, signal: str, direction: str, value: float) -> str:
@@ -1325,22 +1363,24 @@ class SignalScannerManager:
             rejected_conf = stats.get('REJECTED_CONFIDENCE', 0)
             rejected_btc = stats.get('REJECTED_BTC', 0)
             rejected_volatility = stats.get('REJECTED_HIGH_VOLATILITY', 0)
+            rejected_low_atr = stats.get('REJECTED_LOW_ATR', 0)
             no_signal = stats.get('NO_SIGNAL', 0)
             
             log_lines = [
                 f"📊 TARAMA ÖZETİ ({total} Coin)",
                 f"----------------------------------------",
                 f"✅ Sinyal Üretildi: {generated}",
-                f"❌ R/R Yetersiz:    {rejected_rr}  (Fırsat var ama riskli)",
-                f"❌ Trend Uyumsuz:   {rejected_trend}  (Ters işlem koruması)",
-                f"❌ Düşük Güven:     {rejected_conf}  (Sinyal zayıf)",
-                f"❌ Yüksek Volatilite: {rejected_volatility}  (Aşırı volatil coinler)",
-                f"❌ BTC Filtresi:    {rejected_btc}  (Piyasa güvenli)"
+                f"",
+                f"❌ Reddedilme Nedenleri:",
+                f"  • Risk/Reward: {rejected_rr}",
+                f"  • Trend Uyumsuzluğu: {rejected_trend}",
+                f"  • Confidence Yetersiz: {rejected_conf}",
+                f"  • BTC Crash Filtresi: {rejected_btc}",
+                f"  • Yüksek Volatilite: {rejected_volatility}",
+                f"  • Düşük ATR (<%2): {rejected_low_atr}",
+                f"  • Sinyal Yok: {no_signal}",
             ]
             
-            if no_signal > 0:
-                log_lines.append(f"⚪ Sinyal Yok:      {no_signal}  (Teknik sinyal oluşmadı)")
-                
             log_lines.append(f"----------------------------------------")
             
             # Sonuç yorumu
