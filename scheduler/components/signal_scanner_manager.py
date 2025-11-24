@@ -668,7 +668,7 @@ class SignalScannerManager:
             
             if message_id:
                 self.logger.info(
-                    f"{symbol} sinyal bildirimi gönderildi - "
+                    f"{symbol} sinyal bildirimi gönderildi (dir={direction}, score={confidence:.3f}) - "
                     f"Message ID: {message_id}, Signal ID: {signal_id}"
                 )
                 
