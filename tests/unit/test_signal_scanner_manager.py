@@ -18,7 +18,7 @@ def mock_logger(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda self: None,
     )
 
-    def _fake_setup(self) -> None:
+    def _fake_setup(self, all_real_handlers=None) -> None:
         self.logger = MagicMock()
 
     monkeypatch.setattr(logger_module.LoggerManager, "_setup_logger", _fake_setup)
@@ -29,17 +29,17 @@ def mock_logger(monkeypatch: pytest.MonkeyPatch) -> None:
     logger_module.LoggerManager._initialized = False
 
 
-def _build_manager(repository: MagicMock, cooldown_hours: int = 1) -> SignalScannerManager:
+def _build_manager(repository: MagicMock) -> SignalScannerManager:
     return SignalScannerManager(
         coin_filter=MagicMock(),
-        command_handler=MagicMock(),
+        market_data=MagicMock(),
+        signal_generator=MagicMock(),
         entry_calculator=MagicMock(),
         message_formatter=MagicMock(),
         bot_manager=MagicMock(),
         channel_id="channel",
         signal_repository=repository,
         confidence_threshold=0.7,
-        cooldown_hours=cooldown_hours,
     )
 
 
@@ -53,72 +53,63 @@ def test_cache_warmup_populates_cache() -> None:
             "created_at": 1_700_000_000,
         }
     ]
-    repo.get_last_signal_summary.return_value = None
+    repo.get_latest_active_signal_by_symbol.return_value = None
 
     manager = _build_manager(repo)
 
     assert "MINA/USDT" in manager.signal_cache
     cache_entry = manager.signal_cache["MINA/USDT"]
-    assert cache_entry["last_direction"] == "LONG"
-    assert cache_entry["last_signal_time"] == 1_700_000_000
+    assert cache_entry["has_active_signal"] is True
+    assert cache_entry["direction"] == "LONG"
     assert cache_entry["confidence"] == 0.78
 
 
-def test_should_send_notification_uses_db_when_cache_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_should_send_notification_uses_db_when_cache_empty() -> None:
     repo = MagicMock()
     repo.get_recent_signal_summaries.return_value = []
 
-    fixed_now = 2_000_000_000
-    last_signal_time = fixed_now - 600
-
-    repo.get_last_signal_summary.return_value = {
+    # Aktif sinyal var
+    repo.get_latest_active_signal_by_symbol.return_value = {
         "symbol": "MINA/USDT",
         "direction": "LONG",
         "confidence": 0.81,
-        "created_at": last_signal_time,
+        "created_at": 1_700_000_000,
+        "signal_id": "TEST_001",
     }
 
     manager = _build_manager(repo)
+    manager.market_data.get_latest_price.return_value = 100.0
 
-    monkeypatch.setattr(
-        "scheduler.components.signal_scanner_manager.time.time",
-        lambda: fixed_now,
-    )
-
-    should_send = manager._should_send_notification("MINA/USDT", "LONG")
+    signal_data = {"confidence": 0.75, "score_breakdown": {}, "market_context": {}}
+    should_send = manager._should_send_notification("MINA/USDT", "LONG", signal_data)
 
     assert should_send is False
     cache_entry = manager.signal_cache["MINA/USDT"]
-    assert cache_entry["last_signal_time"] == last_signal_time
-    assert cache_entry["last_direction"] == "LONG"
+    assert cache_entry["has_active_signal"] is True
+    assert cache_entry["direction"] == "LONG"
 
 
-def test_should_send_notification_allows_direction_change(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_should_send_notification_blocks_when_active_signal_exists() -> None:
     repo = MagicMock()
     repo.get_recent_signal_summaries.return_value = []
 
-    fixed_now = 2_000_000_000
-    last_signal_time = fixed_now - 300
-
-    repo.get_last_signal_summary.return_value = {
+    # Aktif sinyal var
+    repo.get_latest_active_signal_by_symbol.return_value = {
         "symbol": "MINA/USDT",
         "direction": "LONG",
         "confidence": 0.65,
-        "created_at": last_signal_time,
+        "created_at": 1_700_000_000,
+        "signal_id": "TEST_001",
     }
 
     manager = _build_manager(repo)
+    manager.market_data.get_latest_price.return_value = 100.0
 
-    monkeypatch.setattr(
-        "scheduler.components.signal_scanner_manager.time.time",
-        lambda: fixed_now,
-    )
-
-    # İlk kontrol: aynı yön, cooldown devrede
-    assert manager._should_send_notification("MINA/USDT", "LONG") is False
-
-    # Yön değişince cooldown bypass edilmeli
-    assert manager._should_send_notification("MINA/USDT", "SHORT") is True
+    signal_data = {"confidence": 0.75, "score_breakdown": {}, "market_context": {}}
+    
+    # Aktif sinyal var, yeni sinyal reddedilmeli (yön fark etmez)
+    assert manager._should_send_notification("MINA/USDT", "LONG", signal_data) is False
+    assert manager._should_send_notification("MINA/USDT", "SHORT", signal_data) is False
 
 
 def test_should_send_notification_neutral_direction() -> None:
@@ -126,41 +117,30 @@ def test_should_send_notification_neutral_direction() -> None:
     repo.get_recent_signal_summaries.return_value = []
 
     manager = _build_manager(repo)
-    manager.signal_cache["TA/USDT"] = {
-        "last_direction": "LONG",
-        "last_signal_time": 0,
-        "confidence": 0.8,
-    }
+    manager.market_data.get_latest_price.return_value = 100.0
 
-    assert manager._should_send_notification("TA/USDT", "NEUTRAL") is False
+    signal_data = {"confidence": 0.75, "score_breakdown": {}, "market_context": {}}
+    
+    # NEUTRAL yönlü sinyaller her zaman reddedilir
+    assert manager._should_send_notification("TA/USDT", "NEUTRAL", signal_data) is False
 
 
 def test_neutral_signal_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = MagicMock()
     repo.get_recent_signal_summaries.return_value = []
+    repo.get_latest_active_signal_by_symbol.return_value = None
 
     manager = _build_manager(repo)
-    manager.cmd_handler._analyze_symbol.return_value = {
-        "direction": "NEUTRAL",
-        "confidence": 0.75,
-        "timeframe_signals": {},
-    }
+    manager.market_data.get_latest_price.return_value = 100.0
+    
+    def fake_generate_signal(multi_tf_data, symbol=None, return_reason=False):
+        return {
+            "direction": "NEUTRAL",
+            "confidence": 0.75,
+            "timeframe_signals": {},
+        }
 
-    def fake_rank(signals, top_count):
-        return [
-            {
-                "symbol": signals[0]["symbol"],
-                "signal": signals[0]["signal"],
-                "_ranking_info": {
-                    "total_score": 0.8,
-                    "base_score": 0.8,
-                    "rsi_bonus": 0.0,
-                    "volume_bonus": 0.0,
-                },
-            }
-        ]
-
-    monkeypatch.setattr(manager.signal_ranker, "rank_signals", fake_rank)
+    monkeypatch.setattr(manager.signal_gen, "generate_signal", fake_generate_signal)
     send_mock = MagicMock()
     monkeypatch.setattr(manager, "_send_signal_notification", send_mock)
 

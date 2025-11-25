@@ -230,8 +230,8 @@ class SignalRepository(BaseRepository):
     
     def get_active_signals(self) -> List[Dict]:
         """
-        Retrieves active signals (newer than 72 hours).
-        Checks only 72 hours condition, regardless of TP/SL status.
+        Retrieves active signals (message_deleted = 0).
+        Only checks message_deleted status, regardless of TP/SL status or time.
         
         Returns:
             List of active signals
@@ -240,36 +240,18 @@ class SignalRepository(BaseRepository):
             with self.db.get_db_context() as conn:
                 cursor = conn.cursor()
                 
-                # 72 hours = 259200 seconds
-                hours_72_seconds = 72 * 3600
-                
-                # Get UTC timestamp (independent of system time)
-                current_time_utc = int(time.time())
-                threshold_time = current_time_utc - hours_72_seconds
-                
-                # Signals newer than 72 hours (regardless of TP/SL status)
                 # Signals not deleted (message_deleted = 0)
-                # Works independent of system time using UTC timestamp from Python
                 cursor.execute("""
                     SELECT * FROM signals
-                    WHERE created_at > ? AND (message_deleted = 0 OR message_deleted IS NULL)
+                    WHERE (message_deleted = 0 OR message_deleted IS NULL)
                     ORDER BY created_at DESC
-                """, (threshold_time,))
+                """)
                 
                 rows = cursor.fetchall()
                 active_count = len(rows)
                 
-                # Count signals older than 72 hours (for logger)
-                cursor.execute("""
-                    SELECT COUNT(*) FROM signals
-                    WHERE created_at <= ?
-                """, (threshold_time,))
-                expired_count = cursor.fetchone()[0]
-                
                 # Logger messages
-                self.logger.debug(f"Active signal query: {active_count} active, {expired_count} expired (older than 72h, UTC timestamp: {current_time_utc})")
-                if expired_count > 0:
-                    self.logger.info(f"{expired_count} signals removed from active list as they are older than 72 hours")
+                self.logger.debug(f"Active signal query: {active_count} active signals (message_deleted=0)")
                 
                 return [self.row_to_dict(row) for row in rows]
             
@@ -497,11 +479,55 @@ class SignalRepository(BaseRepository):
     
     
     
+    def get_latest_active_signal_by_symbol(self, symbol: str) -> Optional[Dict]:
+        """
+        Finds the latest active signal for the specified symbol (any direction).
+        Active signal = message_deleted=0
+        
+        Args:
+            symbol: Trading pair (e.g. BTC/USDT)
+            
+        Returns:
+            Signal dict or None
+        """
+        try:
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT * FROM signals
+                    WHERE symbol = ? 
+                      AND (message_deleted = 0 OR message_deleted IS NULL)
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (symbol,))
+                
+                row = cursor.fetchone()
+                
+                if row:
+                    signal = self.row_to_dict(row)
+                    self.logger.debug(
+                        "Active signal found: %s @ %s (signal_id: %s)",
+                        symbol, signal.get('created_at'), signal.get('signal_id')
+                    )
+                    return signal
+                
+                self.logger.debug("Active signal not found for %s", symbol)
+                return None
+            
+        except Exception as e:
+            self.logger.error(
+                f"Active signal finding error ({symbol}): {str(e)}",
+                exc_info=True
+            )
+            return None
+    
     def get_latest_active_signal_by_symbol_direction(
         self, symbol: str, direction: str
     ) -> Optional[Dict]:
         """
         Finds the latest active signal for the specified symbol and direction.
+        Active signal = message_deleted=0
         
         Args:
             symbol: Trading pair (e.g. BTC/USDT)
@@ -511,11 +537,6 @@ class SignalRepository(BaseRepository):
             Signal dict or None
         """
         try:
-            import time
-            hours_72_seconds = 72 * 3600
-            current_time_utc = int(time.time())
-            threshold_time = current_time_utc - hours_72_seconds
-            
             with self.db.get_db_context() as conn:
                 cursor = conn.cursor()
                 
@@ -523,11 +544,10 @@ class SignalRepository(BaseRepository):
                     SELECT * FROM signals
                     WHERE symbol = ? 
                       AND direction = ?
-                      AND created_at > ?
                       AND (message_deleted = 0 OR message_deleted IS NULL)
                     ORDER BY created_at DESC
                     LIMIT 1
-                """, (symbol, direction, threshold_time))
+                """, (symbol, direction))
                 
                 row = cursor.fetchone()
                 
@@ -559,7 +579,7 @@ class SignalRepository(BaseRepository):
         min_confidence_change: float = 0.05  # %5 default
     ) -> bool:
         """
-        Adds a new entry to signal log (when new signal detected during cooldown).
+        Adds a new entry to signal log (when new signal detected but active signal exists).
         Applies filtering to prevent flooding:
         - If at least min_log_interval_seconds passed since last log entry OR
         - If confidence change exceeded min_confidence_change threshold
@@ -888,7 +908,7 @@ class SignalRepository(BaseRepository):
             direction: LONG/SHORT/NEUTRAL
             confidence: Güven skoru
             signal_price: Sinyal fiyatı
-            rejection_reason: 'direction_neutral', 'cooldown_active', 'confidence_below_threshold'
+            rejection_reason: 'direction_neutral', 'active_signal_exists', 'confidence_below_threshold'
             score_breakdown: JSON string
             market_context: JSON string
             

@@ -1,6 +1,6 @@
 """
 SignalScannerManager: Arkaplanda sinyal tarayan ve bildirim gönderen manager.
-Top 5 futures coin'i tarar, güçlü sinyalleri yakalar ve cooldown mekanizması uygular.
+Top 5 futures coin'i tarar, güçlü sinyalleri yakalar ve aktif sinyal kontrolü uygular.
 """
 import time
 import json
@@ -34,7 +34,6 @@ class SignalScannerManager:
         channel_id: str,
         signal_repository: Optional[SignalRepository] = None,
         confidence_threshold: float = 0.69,
-        cooldown_hours: int = 1,
         ranging_min_sl_percent: float = 0.5,
         risk_reward_calc: Optional[RiskRewardCalculator] = None,
         liquidation_safety_filter: Optional[LiquidationSafetyFilter] = None,
@@ -56,7 +55,6 @@ class SignalScannerManager:
             signal_repository: Signal repository (opsiyonel, sinyal kaydetme için)
             confidence_threshold: Minimum confidence threshold (default: 0.69 = %69)
                 DEPRECATED: Use config.confidence_threshold_long/short instead
-            cooldown_hours: Cooldown süresi (saat)
             config: ConfigManager instance (for direction-specific thresholds)
         """
         self.coin_filter = coin_filter
@@ -69,7 +67,6 @@ class SignalScannerManager:
         self.channel_id = channel_id
         self.signal_repository = signal_repository
         self.confidence_threshold = confidence_threshold
-        self.cooldown_seconds = cooldown_hours * 3600
         self.risk_reward_calc = risk_reward_calc  # Risk/Reward calculator
         self.liquidation_safety_filter = liquidation_safety_filter  # Liquidation safety filter
         self.signal_tracker = signal_tracker  # SignalTracker instance (optional, for message updates)
@@ -87,9 +84,8 @@ class SignalScannerManager:
         # Log startup configuration
         self.logger.info(
             "SignalScannerManager başlatıldı - "
-            "threshold=%s, cooldown=%sh, ranging_min_sl=%s%%",
+            "threshold=%s, ranging_min_sl=%s%%",
             confidence_threshold,
-            cooldown_hours,
             ranging_min_sl_percent,
         )
         
@@ -102,7 +98,7 @@ class SignalScannerManager:
             short_threshold, short_threshold * 100
         )
 
-        # Hibrit cooldown için cache warmup
+        # Aktif sinyal kontrolü için cache warmup
         self._warmup_cache_from_db()
     
     def scan_for_signals(self) -> None:
@@ -332,11 +328,9 @@ class SignalScannerManager:
                 self._temp_signal_data = {}
             self._temp_signal_data[symbol] = signal_data
 
-            # Cooldown kontrolü
-            should_send = self._should_send_notification(symbol, overall_direction)
+            # Aktif sinyal kontrolü
+            should_send = self._should_send_notification(symbol, overall_direction, signal_data)
             if not should_send:
-                # Cooldown aktif - yön değişmemişse log ekle
-                self._handle_cooldown_active_signal(symbol, overall_direction, signal_data)
                 return
             
             # Bildirim gönder
@@ -346,44 +340,26 @@ class SignalScannerManager:
             self.logger.error(f"{symbol} sinyal kontrolü hatası: {str(e)}", exc_info=True)
 
     
-    def _should_send_notification(self, symbol: str, direction: str) -> bool:
+    def _should_send_notification(self, symbol: str, direction: str, signal_data: Dict) -> bool:
         """
         Bildirim gönderilip gönderilmeyeceğini kontrol eder.
+        Aktif sinyal (message_deleted=0) varsa reddedilir.
         
         Args:
             symbol: Trading pair
-            direction: LONG/SHORT
+            direction: LONG/SHORT/NEUTRAL
+            signal_data: Sinyal verisi (rejection kaydı için)
             
         Returns:
-            True ise bildirim gönderilmeli
+            True ise bildirim gönderilmeli (aktif sinyal yok)
         """
-        cache_entry = self.signal_cache.get(symbol)
-
-        if cache_entry is None:
-            cache_entry = self._load_cache_entry_from_db(symbol)
-            if cache_entry is None:
-                self.logger.debug("%s için cache ve DB kaydı yok, bildirim gönderilecek", symbol)
-                return True
-            self.logger.debug(
-                "%s cache DB'den dolduruldu: direction=%s, created_at=%s",
-                symbol,
-                cache_entry.get('last_direction'),
-                cache_entry.get('last_signal_time')
-            )
-        
-        last_direction = cache_entry.get('last_direction')
-        last_signal_time = cache_entry.get('last_signal_time', 0)
-        
-        current_time = int(time.time())
-
-        # NEUTRAL yön değişimi cooldown bypass etmez
+        # NEUTRAL yönlü sinyaller her zaman reddedilir
         if direction == 'NEUTRAL':
             self.logger.debug(
-                f"{symbol} NEUTRAL yönlü sinyal cooldown sebebiyle gönderilmiyor"
+                f"{symbol} NEUTRAL yönlü sinyal gönderilmiyor"
             )
             # Rejected signal kaydet
-            if self.signal_repository and hasattr(self, '_temp_signal_data'):
-                signal_data = self._temp_signal_data.get(symbol, {})
+            if self.signal_repository:
                 score_breakdown = signal_data.get('score_breakdown', {})
                 market_context = signal_data.get('market_context', {})
                 current_price = self.market_data.get_latest_price(symbol)
@@ -397,147 +373,91 @@ class SignalScannerManager:
                     market_context=json.dumps(market_context) if market_context else None
                 )
             return False
-
-        # Yön değişmişse (NEUTRAL hariç) hemen bildirim gönder
-        if last_direction != direction:
-            self.logger.debug(f"{symbol} yön değişti: {last_direction} -> {direction}")
-            return True
         
-        # Aynı yön, cooldown kontrolü
-        time_since_last = current_time - last_signal_time
+        # Cache'de aktif sinyal var mı kontrol et
+        cache_entry = self.signal_cache.get(symbol)
         
-        if time_since_last >= self.cooldown_seconds:
-            self.logger.debug(f"{symbol} cooldown süresi doldu: {time_since_last}s")
-            return True
-        
-        self.logger.debug(
-            f"{symbol} cooldown aktif: {time_since_last}s/{self.cooldown_seconds}s"
-        )
-        # Rejected signal kaydet
-        if self.signal_repository and hasattr(self, '_temp_signal_data'):
-            signal_data = self._temp_signal_data.get(symbol, {})
-            score_breakdown = signal_data.get('score_breakdown', {})
-            market_context = signal_data.get('market_context', {})
-            current_price = self.market_data.get_latest_price(symbol)
-            self.signal_repository.save_rejected_signal(
-                symbol=symbol,
-                direction=direction,
-                confidence=signal_data.get('confidence', 0),
-                signal_price=current_price if current_price else 0,
-                rejection_reason='cooldown_active',
-                score_breakdown=json.dumps(score_breakdown) if score_breakdown else None,
-                market_context=json.dumps(market_context) if market_context else None
+        if cache_entry is None:
+            # Cache miss: DB'den kontrol et
+            cache_entry = self._load_cache_entry_from_db(symbol)
+            if cache_entry is None:
+                # DB'de de aktif sinyal yok
+                self.logger.debug("%s için aktif sinyal yok, bildirim gönderilecek", symbol)
+                return True
+            # DB'den aktif sinyal bulundu
+            self.logger.debug(
+                "%s için aktif sinyal bulundu (DB'den): signal_id=%s",
+                symbol,
+                cache_entry.get('signal_id')
             )
-        return False
+            # Rejected signal kaydet
+            if self.signal_repository:
+                score_breakdown = signal_data.get('score_breakdown', {})
+                market_context = signal_data.get('market_context', {})
+                current_price = self.market_data.get_latest_price(symbol)
+                self.signal_repository.save_rejected_signal(
+                    symbol=symbol,
+                    direction=direction,
+                    confidence=signal_data.get('confidence', 0),
+                    signal_price=current_price if current_price else 0,
+                    rejection_reason='active_signal_exists',
+                    score_breakdown=json.dumps(score_breakdown) if score_breakdown else None,
+                    market_context=json.dumps(market_context) if market_context else None
+                )
+            return False
+        
+        # Cache'de aktif sinyal var mı?
+        if cache_entry.get('has_active_signal', False):
+            self.logger.debug(
+                "%s için aktif sinyal var (cache'den), bildirim gönderilmeyecek",
+                symbol
+            )
+            # Rejected signal kaydet
+            if self.signal_repository:
+                score_breakdown = signal_data.get('score_breakdown', {})
+                market_context = signal_data.get('market_context', {})
+                current_price = self.market_data.get_latest_price(symbol)
+                self.signal_repository.save_rejected_signal(
+                    symbol=symbol,
+                    direction=direction,
+                    confidence=signal_data.get('confidence', 0),
+                    signal_price=current_price if current_price else 0,
+                    rejection_reason='active_signal_exists',
+                    score_breakdown=json.dumps(score_breakdown) if score_breakdown else None,
+                    market_context=json.dumps(market_context) if market_context else None
+                )
+            return False
+        
+        # Aktif sinyal yok
+        return True
     
     def _load_cache_entry_from_db(self, symbol: str) -> Optional[Dict]:
-        """Cache miss olduğunda veritabanından son sinyali yükler."""
+        """Cache miss olduğunda veritabanından aktif sinyal kontrolü yapar."""
         if not self.signal_repository:
             return None
 
-        summary = self.signal_repository.get_last_signal_summary(symbol)
-        if not summary:
+        # Aktif sinyal var mı kontrol et (message_deleted=0, yön fark etmez)
+        active_signal = self.signal_repository.get_latest_active_signal_by_symbol(symbol)
+        if not active_signal:
+            # Aktif sinyal yok
+            self._update_signal_cache(
+                symbol=symbol,
+                has_active_signal=False,
+                source='db-fallback'
+            )
             return None
 
+        # Aktif sinyal var
         return self._update_signal_cache(
             symbol=symbol,
-            direction=summary.get('direction', 'NEUTRAL'),
-            confidence=float(summary.get('confidence', 0.0) or 0.0),
-            timestamp=summary.get('created_at'),
+            has_active_signal=True,
+            signal_id=active_signal.get('signal_id'),
+            direction=active_signal.get('direction', 'NEUTRAL'),
+            confidence=float(active_signal.get('confidence', 0.0) or 0.0),
+            timestamp=active_signal.get('created_at'),
             source='db-fallback'
         )
     
-    def _handle_cooldown_active_signal(
-        self, symbol: str, direction: str, signal_data: Dict
-    ) -> None:
-        """
-        Cooldown aktif durumunda yeni sinyal tespit edildiğinde çağrılır.
-        Yön değişmemişse, aktif sinyalin günlüğüne log ekler ve mesajı günceller.
-        
-        Args:
-            symbol: Trading pair
-            direction: LONG/SHORT (yön değişmemiş)
-            signal_data: Yeni sinyal verisi
-        """
-        try:
-            if not self.signal_repository:
-                self.logger.debug(f"{symbol} signal_repository yok, log eklenemedi")
-                return
-            
-            # Yeni sinyal fiyatını al
-            current_price = self.market_data.get_latest_price(symbol)
-            if not current_price:
-                self.logger.debug(f"{symbol} güncel fiyat alınamadı, log eklenemedi")
-                return
-            
-            new_confidence = signal_data.get('confidence', 0.0)
-            
-            # Aktif sinyali bul
-            active_signal = self.signal_repository.get_latest_active_signal_by_symbol_direction(
-                symbol, direction
-            )
-            
-            if not active_signal:
-                self.logger.debug(
-                    f"{symbol} {direction} için aktif sinyal bulunamadı, log eklenemedi"
-                )
-                return
-            
-            active_signal_id = active_signal.get('signal_id')
-            old_confidence = active_signal.get('confidence', 0.0)
-            
-            # Confidence değerlerini float'a çevir (floating point precision sorunlarını önlemek için)
-            old_confidence = float(old_confidence) if old_confidence is not None else 0.0
-            new_confidence = float(new_confidence) if new_confidence is not None else 0.0
-            
-            # Debug: Confidence değerlerini logla
-            confidence_change_calc = new_confidence - old_confidence
-            self.logger.debug(
-                f"{symbol} cooldown aktif - confidence karşılaştırması: "
-                f"yeni={new_confidence:.6f} ({new_confidence * 100:.2f}%), "
-                f"eski={old_confidence:.6f} ({old_confidence * 100:.2f}%), "
-                f"fark={confidence_change_calc:+.6f}"
-            )
-            
-            # Sinyal günlüğüne entry ekle (flood önleme ile)
-            # Minimum 10 dakika aralık veya %5 confidence değişikliği ile filtreleme
-            success = self.signal_repository.add_signal_log_entry(
-                signal_id=active_signal_id,
-                price=current_price,
-                confidence=new_confidence,
-                old_confidence=old_confidence,
-                min_log_interval_seconds=600,  # 10 dakika
-                min_confidence_change=0.05  # %5
-            )
-            
-            if success:
-                self.logger.info(
-                    f"{symbol} cooldown aktif - yeni sinyal günlüğe eklendi: "
-                    f"signal_id={active_signal_id}, price={current_price}, "
-                    f"confidence={new_confidence:.3f} ({new_confidence * 100:.2f}%), "
-                    f"eski={old_confidence:.3f} ({old_confidence * 100:.2f}%), "
-                    f"change={confidence_change_calc:+.6f}"
-                )
-                
-                # Mesaj güncellemesi kaldırıldı - kullanıcı buton ile manuel güncelleyecek
-                # veya TP/SL hit olunca otomatik güncellenecek
-                self.logger.debug(
-                    f"{symbol} cooldown aktif - sinyal günlüğüne entry eklendi, "
-                    f"mesaj güncellemesi kullanıcı buton ile yapılacak veya TP/SL hit olunca otomatik yapılacak"
-                )
-            else:
-                # Log eklenmedi - bu filtreleme nedeniyle olabilir (normal durum)
-                # veya bir hata olabilir
-                self.logger.debug(
-                    f"{symbol} sinyal günlüğüne entry eklenmedi "
-                    f"(filtreleme veya hata): {active_signal_id}"
-                )
-                
-        except Exception as e:
-            self.logger.error(
-                f"{symbol} cooldown aktif sinyal işleme hatası: {str(e)}",
-                exc_info=True
-            )
 
     def _send_signal_notification(self, symbol: str, signal_data: Dict) -> None:
         """
@@ -693,9 +613,11 @@ class SignalScannerManager:
                             exc_info=True
                         )
 
-                # Cache güncelle (hibrit cooldown)
+                # Cache güncelle (aktif sinyal var)
                 self._update_signal_cache(
                     symbol=symbol,
+                    has_active_signal=True,
+                    signal_id=signal_id,
                     direction=direction,
                     confidence=confidence,
                     timestamp=signal_created_at,
@@ -721,14 +643,16 @@ class SignalScannerManager:
                 
                 # ÖNEMLİ: Cache güncellemesi message_id alınamasa bile yapılmalı
                 # Çünkü mesaj Telegram'a gönderilmiş olabilir (ama message_id alınamamış olabilir)
-                # Bu durumda en azından cooldown mekanizması çalışmalı ki aynı sinyal tekrar gönderilmesin
-                # Cache güncelleme, cooldown kontrolü için kritik öneme sahiptir
+                # Bu durumda en azından aktif sinyal kontrolü çalışmalı ki aynı sinyal tekrar gönderilmesin
+                # Cache güncelleme, aktif sinyal kontrolü için kritik öneme sahiptir
                 self.logger.warning(
-                    f"{symbol} için cache güncelleniyor (message_id alınamadı ama cooldown korunmalı) - "
+                    f"{symbol} için cache güncelleniyor (message_id alınamadı ama aktif sinyal korunmalı) - "
                     f"Signal ID: {signal_id}, Direction: {direction}, Timestamp: {signal_created_at}"
                 )
                 self._update_signal_cache(
                     symbol=symbol,
+                    has_active_signal=True,
+                    signal_id=signal_id,
                     direction=direction,
                     confidence=confidence,
                     timestamp=signal_created_at,
@@ -738,9 +662,9 @@ class SignalScannerManager:
         except Exception as e:
             self.logger.error(f"{symbol} bildirim gönderme hatası: {str(e)}", exc_info=True)
             
-            # Exception durumunda bile cache güncellemesi yapılmalı (cooldown korunmalı)
+            # Exception durumunda bile cache güncellemesi yapılmalı (aktif sinyal korunmalı)
             # Eğer mesaj gönderilmeye çalışıldıysa ama exception oluştuysa,
-            # cooldown mekanizmasının çalışması için cache güncellenmelidir
+            # aktif sinyal kontrolünün çalışması için cache güncellenmelidir
             try:
                 # signal_data parametre olarak geldiği için direkt erişilebilir
                 direction = signal_data.get('direction')
@@ -749,11 +673,12 @@ class SignalScannerManager:
                 
                 if direction:
                     self.logger.warning(
-                        f"{symbol} için cache güncelleniyor (exception sonrası cooldown korunmalı) - "
+                        f"{symbol} için cache güncelleniyor (exception sonrası aktif sinyal korunmalı) - "
                         f"Direction: {direction}, Timestamp: {signal_created_at}"
                     )
                     self._update_signal_cache(
                         symbol=symbol,
+                        has_active_signal=True,
                         direction=direction,
                         confidence=confidence,
                         timestamp=signal_created_at,
@@ -1065,61 +990,70 @@ class SignalScannerManager:
     def _update_signal_cache(
         self,
         symbol: str,
-        direction: str,
-        confidence: float,
+        has_active_signal: bool,
+        signal_id: Optional[str] = None,
+        direction: Optional[str] = None,
+        confidence: Optional[float] = None,
         timestamp: Optional[int] = None,
         source: str = 'runtime'
-    ) -> Dict:
+    ) -> Optional[Dict]:
         """
-        Sinyal cache'ini günceller.
+        Sinyal cache'ini günceller (aktif sinyal durumunu takip eder).
         
         Args:
             symbol: Trading pair
-            direction: LONG/SHORT
-            confidence: Confidence değeri
+            has_active_signal: Aktif sinyal var mı? (message_deleted=0)
+            signal_id: Signal ID (opsiyonel)
+            direction: LONG/SHORT (opsiyonel)
+            confidence: Confidence değeri (opsiyonel)
             timestamp: Sinyal zamanı (None ise current time)
             source: Güncelleme kaynağı (loglama için)
         """
         current_time = timestamp if timestamp is not None else int(time.time())
         
         self.signal_cache[symbol] = {
-            'last_signal_time': current_time,
-            'last_direction': direction,
-            'confidence': confidence
+            'has_active_signal': has_active_signal,
+            'last_updated': current_time
         }
         
+        if signal_id:
+            self.signal_cache[symbol]['signal_id'] = signal_id
+        if direction:
+            self.signal_cache[symbol]['direction'] = direction
+        if confidence is not None:
+            self.signal_cache[symbol]['confidence'] = confidence
+        
         self.logger.debug(
-            "%s cache güncellendi (%s): direction=%s, time=%s, confidence=%.3f",
+            "%s cache güncellendi (%s): has_active_signal=%s, signal_id=%s",
             symbol,
             source,
-            direction,
-            current_time,
-            confidence
+            has_active_signal,
+            signal_id or 'N/A'
         )
         return self.signal_cache[symbol]
     
     def _warmup_cache_from_db(self) -> None:
-        """Uygulama başlatılırken cooldown cache'ini veritabanından doldurur."""
+        """Uygulama başlatılırken aktif sinyal cache'ini veritabanından doldurur."""
         if not self.signal_repository:
-            self.logger.debug("Cooldown cache warmup atlandı: SignalRepository tanımlı değil")
+            self.logger.debug("Aktif sinyal cache warmup atlandı: SignalRepository tanımlı değil")
             return
 
-        base_hours = int(self.cooldown_seconds / 3600)
-        if base_hours <= 0:
-            base_hours = 1
-        lookback_hours = max(24, base_hours * 3)
+        # Son 24 saat içindeki aktif sinyalleri yükle
+        lookback_hours = 24
 
         summaries = self.signal_repository.get_recent_signal_summaries(lookback_hours)
         if not summaries:
             self.logger.debug(
-                "Cooldown cache warmup verisi bulunamadı (lookback=%dh)",
+                "Aktif sinyal cache warmup verisi bulunamadı (lookback=%dh)",
                 lookback_hours
             )
             return
 
         for summary in summaries:
+            # Her summary aktif sinyal demektir (get_recent_signal_summaries zaten message_deleted=0 kontrolü yapıyor)
             self._update_signal_cache(
                 symbol=summary.get('symbol'),
+                has_active_signal=True,
                 direction=summary.get('direction', 'NEUTRAL'),
                 confidence=float(summary.get('confidence', 0.0) or 0.0),
                 timestamp=summary.get('created_at'),
@@ -1127,7 +1061,7 @@ class SignalScannerManager:
             )
 
         self.logger.info(
-            "Cooldown cache warmup tamamlandı: %d sembol yüklendi (lookback=%dh)",
+            "Aktif sinyal cache warmup tamamlandı: %d sembol yüklendi (lookback=%dh)",
             len(summaries),
             lookback_hours
         )
@@ -1162,39 +1096,32 @@ class SignalScannerManager:
         Returns:
             Cache istatistikleri
         """
-        current_time = int(time.time())
-        
-        active_signals = 0
-        for symbol, data in self.signal_cache.items():
-            time_since_last = current_time - data.get('last_signal_time', 0)
-            if time_since_last < self.cooldown_seconds:
-                active_signals += 1
+        active_signals = sum(
+            1 for data in self.signal_cache.values()
+            if data.get('has_active_signal', False)
+        )
         
         return {
             'total_cached_symbols': len(self.signal_cache),
-            'active_cooldowns': active_signals,
-            'confidence_threshold': self.confidence_threshold,
-            'cooldown_hours': self.cooldown_seconds / 3600
+            'active_signals': active_signals,
+            'confidence_threshold': self.confidence_threshold
         }
     
     def cleanup_old_cache(self) -> None:
-        """Eski cache girişlerini temizler."""
-        current_time = int(time.time())
-        cleanup_threshold = self.cooldown_seconds * 2  # 2x cooldown süresi
-        
+        """Pasif sinyalleri (has_active_signal=False) cache'den temizler."""
         symbols_to_remove = []
         
         for symbol, data in self.signal_cache.items():
-            time_since_last = current_time - data.get('last_signal_time', 0)
-            if time_since_last > cleanup_threshold:
+            # Aktif sinyal yoksa cache'den kaldır
+            if not data.get('has_active_signal', False):
                 symbols_to_remove.append(symbol)
         
         for symbol in symbols_to_remove:
             del self.signal_cache[symbol]
-            self.logger.debug(f"{symbol} cache'den temizlendi")
+            self.logger.debug(f"{symbol} cache'den temizlendi (aktif sinyal yok)")
         
         if symbols_to_remove:
-            self.logger.info(f"{len(symbols_to_remove)} eski cache girişi temizlendi")
+            self.logger.info(f"{len(symbols_to_remove)} pasif sinyal cache'den temizlendi")
     
     def _log_rejection_scorecard(
         self,

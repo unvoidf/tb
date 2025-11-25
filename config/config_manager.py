@@ -223,19 +223,6 @@ class ConfigManager:
             return 0.69
     
     @property
-    def cooldown_hours(self) -> int:
-        """Cooldown duration (.env -> COOLDOWN_HOURS), else 1 hour.
-
-        Example .env:
-            COOLDOWN_HOURS=1
-        """
-        try:
-            val = os.getenv('COOLDOWN_HOURS')
-            return int(val) if val is not None else 1
-        except Exception:
-            return 1
-    
-    @property
     def min_atr_percent(self) -> float:
         """Minimum ATR percentage (.env -> MIN_ATR_PERCENT), else 2.0.
         

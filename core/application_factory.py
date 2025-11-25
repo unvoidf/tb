@@ -350,7 +350,6 @@ class ApplicationFactory:
             channel_id=config.telegram_channel_id,
             signal_repository=signal_repository,
             confidence_threshold=config.confidence_threshold,  # from .env or default 0.69
-            cooldown_hours=config.cooldown_hours,  # from .env or default 1
             ranging_min_sl_percent=config.ranging_min_sl_percent,  # from .env or default 0.5
             risk_reward_calc=risk_reward_calc,
             liquidation_safety_filter=liquidation_safety_filter,
