@@ -446,6 +446,22 @@ class SimulationEngine:
         summary['first_signal_time'] = first_signal_time
         summary['last_signal_time'] = last_signal_time
         
+        # Calculate actual open signals from DB (not just simulated positions)
+        open_signals_count = sum(
+            1 for signal in self.signals
+            if not (
+                (signal.get('tp1_hit') and signal.get('tp1_hit_at')) or
+                (signal.get('sl1_hit') and signal.get('sl1_hit_at')) or
+                (signal.get('sl1_5_hit') and signal.get('sl1_5_hit_at')) or
+                (signal.get('sl2_hit') and signal.get('sl2_hit_at'))
+            )
+        )
+        summary['open_signals_from_db'] = open_signals_count
+        
+        # Add min_sl_liq_buffer to manual_config if provided
+        if manual_config is not None:
+            manual_config['min_sl_liq_buffer'] = self.min_sl_liq_buffer
+        
         # Generate summary report
         self.report_generator.generate_summary_report(
             summary, self.portfolio, auto_optimized, manual_config

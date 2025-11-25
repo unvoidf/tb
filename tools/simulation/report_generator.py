@@ -54,9 +54,11 @@ class ReportGenerator:
             self.log("", detail=False)  # Empty line after optimization info
         elif manual_config:
             self.log("📊 Manuel Konfigürasyon", detail=False)
+            min_sl_liq_buffer = manual_config.get('min_sl_liq_buffer', 0.01)
             self.log(
                 f"⚙️  Parametreler: Risk %{manual_config['risk']} | "
-                f"Kaldıraç {manual_config['leverage']}x",
+                f"Kaldıraç {manual_config['leverage']}x | "
+                f"Likidite Buffer %{min_sl_liq_buffer*100:.1f}",
                 detail=False
             )
             self.log("", detail=False)  # Empty line after config info
@@ -238,8 +240,19 @@ class ReportGenerator:
         
         # Açık pozisyon sayısı (her zaman göster)
         open_trades = summary.get('open_trades', 0)
-        if open_trades > 0:
-            self.log(f"📊 Açık Pozisyon: {open_trades} adet", detail=False)
+        open_signals_from_db = summary.get('open_signals_from_db', 0)
+        
+        # Show both simulated open positions and actual open signals from DB
+        if open_signals_from_db > 0:
+            if open_trades != open_signals_from_db:
+                # Mismatch: some signals were skipped
+                self.log(
+                    f"📊 Açık Pozisyon: {open_trades} adet "
+                    f"(DB'de {open_signals_from_db} açık sinyal)",
+                    detail=False
+                )
+            else:
+                self.log(f"📊 Açık Pozisyon: {open_trades} adet", detail=False)
         else:
             self.log(f"📊 Açık Pozisyon: 0 adet", detail=False)
     
