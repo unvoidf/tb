@@ -1,13 +1,15 @@
 """
 LoggerManager: Central log management system.
-Structure that writes logs to both file and console with Async logging + Rotating/TimedRotating file handler.
-Categorized log files: signal_scanner.log, signal_tracker.log, trendbot.log
+Hourly date-based logging: logs/YYYY-MM-DD/category_HH.log
+Categorized log files: signal_scanner, signal_tracker, trendbot
 """
 import logging
 import os
 import queue
 import threading
-from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler, QueueHandler, QueueListener
+from datetime import datetime
+from logging import FileHandler
+from logging.handlers import QueueHandler, QueueListener
 from typing import Optional, List
 
 
@@ -53,6 +55,79 @@ class ExcludeLoggerNameFilter(logging.Filter):
         return True
 
 
+class HourlyFileHandler(FileHandler):
+    """
+    Custom file handler that creates a new log file every hour.
+    File structure: logs/YYYY-MM-DD/category_HH.log
+    """
+    
+    def __init__(self, log_dir: str, category: str, level: int = logging.NOTSET):
+        """
+        Args:
+            log_dir: Base log directory (e.g., 'logs')
+            category: Log category name (e.g., 'signal_scanner', 'signal_tracker', 'trendbot')
+            level: Log level
+        """
+        self.log_dir = log_dir
+        self.category = category
+        self.current_date = None
+        self.current_hour = None
+        self._lock = threading.Lock()
+        
+        # Initialize with current date/hour
+        self._update_file_path()
+        
+        # Create directory if needed
+        os.makedirs(os.path.dirname(self.baseFilename), exist_ok=True)
+        
+        super().__init__(self.baseFilename, mode='a', encoding='utf-8', delay=False)
+        self.setLevel(level)
+    
+    def _update_file_path(self) -> None:
+        """Updates the file path based on current date and hour."""
+        now = datetime.now()
+        date_str = now.strftime('%Y-%m-%d')
+        hour = now.hour
+        
+        # Only update if date or hour changed
+        if self.current_date != date_str or self.current_hour != hour:
+            self.current_date = date_str
+            self.current_hour = hour
+            
+            # Create date-based directory
+            date_dir = os.path.join(self.log_dir, date_str)
+            os.makedirs(date_dir, exist_ok=True)
+            
+            # File name: category_HH.log (e.g., signal_scanner_14.log)
+            filename = f"{self.category}_{hour:02d}.log"
+            self.baseFilename = os.path.join(date_dir, filename)
+    
+    def emit(self, record: logging.LogRecord) -> None:
+        """Emit a log record, creating new file if hour changed."""
+        with self._lock:
+            # Check if we need to switch to a new file
+            now = datetime.now()
+            date_str = now.strftime('%Y-%m-%d')
+            hour = now.hour
+            
+            if self.current_date != date_str or self.current_hour != hour:
+                # Hour changed, close current file and open new one
+                if self.stream:
+                    self.stream.close()
+                    self.stream = None
+                
+                self._update_file_path()
+                
+                # Open new file
+                if self.delay:
+                    self.stream = None
+                else:
+                    self.stream = self._open()
+        
+        # Call parent emit
+        super().emit(record)
+
+
 class LoggerManager:
     """Provides application-wide log management."""
     
@@ -66,23 +141,13 @@ class LoggerManager:
         return cls._instance
     
     def __init__(self, log_dir: str = 'logs', 
-                 max_bytes: Optional[int] = None,
-                 backup_count: Optional[int] = None,
-                 async_enabled: Optional[bool] = None,
-                 rotation_type: Optional[str] = None,
-                 rotation_when: Optional[str] = None,
-                 rotation_interval: Optional[int] = None):
+                 async_enabled: Optional[bool] = None):
         """
-        Initializes LoggerManager.
+        Initializes LoggerManager with hourly date-based logging.
         
         Args:
-            log_dir: Directory where log files will be saved
-            max_bytes: Maximum size of each log file (default: read from .env or 1MB)
-            backup_count: Number of backup logs to keep (default: read from .env or 5)
+            log_dir: Base directory where log files will be saved (default: 'logs')
             async_enabled: Is async logging enabled? (default: read from .env or True)
-            rotation_type: Rotation type: 'size', 'time', 'both' (default: read from .env or 'both')
-            rotation_when: Time-based rotation: 'midnight', 'H', 'D', 'W' (default: read from .env or 'midnight')
-            rotation_interval: Time-based rotation interval (default: read from .env or 1)
         """
         if self._initialized:
             return
@@ -90,53 +155,12 @@ class LoggerManager:
         # Read log settings from .env
         self.log_dir = log_dir or os.getenv('LOG_DIR', 'logs')
         
-        if max_bytes is None:
-            try:
-                max_bytes_str = os.getenv('LOG_MAX_BYTES')
-                self.max_bytes = int(max_bytes_str) if max_bytes_str else (1 * 1024 * 1024)  # 1MB default
-            except (ValueError, TypeError):
-                self.max_bytes = 1 * 1024 * 1024  # 1MB default
-        else:
-            self.max_bytes = max_bytes
-        
-        if backup_count is None:
-            try:
-                backup_count_str = os.getenv('LOG_BACKUP_COUNT')
-                self.backup_count = int(backup_count_str) if backup_count_str else 5
-            except (ValueError, TypeError):
-                self.backup_count = 5
-        else:
-            self.backup_count = backup_count
-        
         # Async logging setting
         if async_enabled is None:
             async_str = os.getenv('LOG_ASYNC_ENABLED', 'true').lower()
             self.async_enabled = async_str in ('true', '1', 'yes')
         else:
             self.async_enabled = async_enabled
-        
-        # Rotation type: 'size', 'time', 'both'
-        if rotation_type is None:
-            self.rotation_type = os.getenv('LOG_ROTATION_TYPE', 'both').lower()
-            if self.rotation_type not in ('size', 'time', 'both'):
-                self.rotation_type = 'both'
-        else:
-            self.rotation_type = rotation_type
-        
-        # Time rotation settings
-        if rotation_when is None:
-            self.rotation_when = os.getenv('LOG_ROTATION_WHEN', 'midnight').lower()
-        else:
-            self.rotation_when = rotation_when
-        
-        if rotation_interval is None:
-            try:
-                interval_str = os.getenv('LOG_ROTATION_INTERVAL', '1')
-                self.rotation_interval = int(interval_str)
-            except (ValueError, TypeError):
-                self.rotation_interval = 1
-        else:
-            self.rotation_interval = rotation_interval
         
         # Queue and listener for async logging
         self._log_queue = None
@@ -160,79 +184,27 @@ class LoggerManager:
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
     
-    def _create_file_handlers(self, log_file: str, level: int) -> List[logging.Handler]:
+    def _create_hourly_handler(self, category: str, level: int) -> Optional[logging.Handler]:
         """
-        Creates file handlers (based on rotation type).
+        Creates hourly file handler for a category.
         
         Args:
-            log_file: Log file path
+            category: Log category name (e.g., 'signal_scanner', 'signal_tracker', 'trendbot')
             level: Log level
             
         Returns:
-            List of Handler instances (can be empty)
+            Handler instance or None
         """
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        
-        handlers = []
-        
-        # Size-based rotation (RotatingFileHandler)
-        if self.rotation_type in ('size', 'both'):
-            try:
-                size_handler = RotatingFileHandler(
-                    log_file,
-                    maxBytes=self.max_bytes,
-                    backupCount=self.backup_count,
-                    encoding='utf-8'
-                )
-                size_handler.setLevel(level)
-                size_handler.setFormatter(formatter)
-                handlers.append(size_handler)
-            except Exception:
-                pass
-        
-        # Time-based rotation (TimedRotatingFileHandler)
-        if self.rotation_type in ('time', 'both'):
-            try:
-                # Use different file for time rotation in "both" mode (to prevent duplicates)
-                # Use same file in "time" mode
-                if self.rotation_type == 'both':
-                    # Separate file for time rotation: trendbot.log -> trendbot_time.log
-                    time_log_file = log_file.replace('.log', '_time.log')
-                else:
-                    time_log_file = log_file
-                
-                time_handler = TimedRotatingFileHandler(
-                    time_log_file,
-                    when=self.rotation_when,
-                    interval=self.rotation_interval,
-                    backupCount=self.backup_count,
-                    encoding='utf-8'
-                )
-                time_handler.setLevel(level)
-                time_handler.setFormatter(formatter)
-                handlers.append(time_handler)
-            except Exception:
-                pass
-        
-        # If no handler, create fallback handler
-        if not handlers:
-            try:
-                fallback_handler = RotatingFileHandler(
-                    log_file,
-                    maxBytes=self.max_bytes,
-                    backupCount=self.backup_count,
-                    encoding='utf-8'
-                )
-                fallback_handler.setLevel(level)
-                fallback_handler.setFormatter(formatter)
-                handlers.append(fallback_handler)
-            except Exception:
-                pass
-        
-        return handlers
+        try:
+            handler = HourlyFileHandler(self.log_dir, category, level)
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            handler.setFormatter(formatter)
+            return handler
+        except Exception:
+            return None
     
     def _setup_logger(self, real_handlers: List[logging.Handler]) -> None:
         """
@@ -265,26 +237,25 @@ class LoggerManager:
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         
-        # File Handler(s) - can be multiple based on rotation type
-        log_file = os.path.join(self.log_dir, 'trendbot.log')
-        file_handlers = self._create_file_handlers(log_file, level)
-        # Add exclude filter to trendbot.log handler (exclude categorized logs)
-        # This prevents duplicate logs
-        exclude_filter = ExcludeLoggerNameFilter([
-            'TrendBot.SignalScannerManager',
-            'TrendBot.SignalGenerator',
-            'TrendBot.SignalRanker',
-            'TrendBot.RangingStrategyAnalyzer',
-            'TrendBot.AdaptiveThresholdManager',
-            'TrendBot.TechnicalIndicatorCalculator',
-            'TrendBot.VolumeAnalyzer',
-            'TrendBot.MarketAnalyzer',
-            'TrendBot.LiquidationSafetyFilter',
-            'TrendBot.SignalTracker'
-        ])
-        for handler in file_handlers:
-            handler.addFilter(exclude_filter)
-        real_handlers.extend(file_handlers)
+        # File Handler for trendbot category (general logs)
+        trendbot_handler = self._create_hourly_handler('trendbot', level)
+        if trendbot_handler:
+            # Add exclude filter to trendbot handler (exclude categorized logs)
+            # This prevents duplicate logs
+            exclude_filter = ExcludeLoggerNameFilter([
+                'TrendBot.SignalScannerManager',
+                'TrendBot.SignalGenerator',
+                'TrendBot.SignalRanker',
+                'TrendBot.RangingStrategyAnalyzer',
+                'TrendBot.AdaptiveThresholdManager',
+                'TrendBot.TechnicalIndicatorCalculator',
+                'TrendBot.VolumeAnalyzer',
+                'TrendBot.MarketAnalyzer',
+                'TrendBot.LiquidationSafetyFilter',
+                'TrendBot.SignalTracker'
+            ])
+            trendbot_handler.addFilter(exclude_filter)
+            real_handlers.append(trendbot_handler)
         
         # Console Handler (always synchronous)
         console_handler = logging.StreamHandler()
@@ -309,7 +280,7 @@ class LoggerManager:
     
     def _setup_categorized_loggers(self, real_handlers: List[logging.Handler]) -> None:
         """
-        Configures categorized loggers.
+        Configures categorized loggers with hourly date-based files.
         
         Args:
             real_handlers: List to add handlers to (for async)
@@ -326,32 +297,30 @@ class LoggerManager:
         root_logger = logging.getLogger('TrendBot')
         
         # 1. Signal Scanner Logger (Signal scanning and generation)
-        scanner_file = os.path.join(self.log_dir, 'signal_scanner.log')
-        scanner_handlers = self._create_file_handlers(scanner_file, level)
-        # Filter only signal scanning related loggers
-        scanner_filter = LoggerNameFilter([
-            'TrendBot.SignalScannerManager',
-            'TrendBot.SignalGenerator',
-            'TrendBot.SignalRanker',
-            'TrendBot.RangingStrategyAnalyzer',
-            'TrendBot.AdaptiveThresholdManager',
-            'TrendBot.TechnicalIndicatorCalculator',
-            'TrendBot.VolumeAnalyzer',
-            'TrendBot.MarketAnalyzer',
-            'TrendBot.LiquidationSafetyFilter'  # Liquidation risk analysis here too
-        ])
-        for handler in scanner_handlers:
-            handler.addFilter(scanner_filter)
-            real_handlers.append(handler)
+        scanner_handler = self._create_hourly_handler('signal_scanner', level)
+        if scanner_handler:
+            # Filter only signal scanning related loggers
+            scanner_filter = LoggerNameFilter([
+                'TrendBot.SignalScannerManager',
+                'TrendBot.SignalGenerator',
+                'TrendBot.SignalRanker',
+                'TrendBot.RangingStrategyAnalyzer',
+                'TrendBot.AdaptiveThresholdManager',
+                'TrendBot.TechnicalIndicatorCalculator',
+                'TrendBot.VolumeAnalyzer',
+                'TrendBot.MarketAnalyzer',
+                'TrendBot.LiquidationSafetyFilter'  # Liquidation risk analysis here too
+            ])
+            scanner_handler.addFilter(scanner_filter)
+            real_handlers.append(scanner_handler)
         
         # 2. Signal Tracker Logger (TP/SL tracking)
-        tracker_file = os.path.join(self.log_dir, 'signal_tracker.log')
-        tracker_handlers = self._create_file_handlers(tracker_file, level)
-        # Filter only TP/SL tracking related loggers
-        tracker_filter = LoggerNameFilter(['TrendBot.SignalTracker'])
-        for handler in tracker_handlers:
-            handler.addFilter(tracker_filter)
-            real_handlers.append(handler)
+        tracker_handler = self._create_hourly_handler('signal_tracker', level)
+        if tracker_handler:
+            # Filter only TP/SL tracking related loggers
+            tracker_filter = LoggerNameFilter(['TrendBot.SignalTracker'])
+            tracker_handler.addFilter(tracker_filter)
+            real_handlers.append(tracker_handler)
         
         # In synchronous mode, add handlers directly
         if not self.async_enabled:

@@ -164,12 +164,7 @@ class ApplicationFactory:
         log_cfg = config.log_config
         return LoggerManager(
             log_dir=log_cfg['log_dir'],
-            max_bytes=log_cfg['max_bytes'],
-            backup_count=log_cfg['backup_count'],
-            async_enabled=log_cfg['async_enabled'],
-            rotation_type=log_cfg['rotation_type'],
-            rotation_when=log_cfg['rotation_when'],
-            rotation_interval=log_cfg['rotation_interval']
+            async_enabled=log_cfg['async_enabled']
         )
     
     def _create_retry_handler(self, config: ConfigManager) -> RetryHandler:

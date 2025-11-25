@@ -346,13 +346,8 @@ class ConfigManager:
             rotation_interval = 1
         
         return {
-            'max_bytes': max_bytes,
-            'backup_count': backup_count,
             'log_dir': log_dir,
-            'async_enabled': async_enabled,
-            'rotation_type': rotation_type,
-            'rotation_when': rotation_when,
-            'rotation_interval': rotation_interval
+            'async_enabled': async_enabled
         }
 
     def _load_phase1_env(self) -> None:
