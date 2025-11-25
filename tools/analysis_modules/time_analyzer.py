@@ -35,7 +35,7 @@ class TimeAnalyzer:
             hour = datetime.fromtimestamp(sig.created_at).hour
             hourly_stats[hour]['total'] += 1
             
-            if sig.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED, SignalOutcome.TP3_REACHED]:
+            if sig.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED]:
                 hourly_stats[hour]['wins'] += 1
             elif sig.outcome == SignalOutcome.SL_HIT:
                 hourly_stats[hour]['losses'] += 1
@@ -70,7 +70,7 @@ class TimeAnalyzer:
             day = datetime.fromtimestamp(sig.created_at).strftime('%A')
             daily_stats[day]['total'] += 1
             
-            if sig.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED, SignalOutcome.TP3_REACHED]:
+            if sig.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED]:
                 daily_stats[day]['wins'] += 1
             elif sig.outcome == SignalOutcome.SL_HIT:
                 daily_stats[day]['losses'] += 1
@@ -88,7 +88,7 @@ class TimeAnalyzer:
     def _analyze_hold_times(self) -> Dict:
         """Analyzes hold time distributions."""
         tp_times = [s.hold_time_hours for s in self.signal_stats 
-                   if s.hold_time_hours and s.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED, SignalOutcome.TP3_REACHED]]
+                   if s.hold_time_hours and s.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED]]
         sl_times = [s.hold_time_hours for s in self.signal_stats 
                    if s.hold_time_hours and s.outcome == SignalOutcome.SL_HIT]
         

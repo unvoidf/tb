@@ -51,7 +51,6 @@ class ReportGenerator:
         table.add_row("[bold]TP Outcomes[/bold]", "")
         table.add_row("  TP1 Hit", f"[green]{metrics.tp1_count}[/green] ({metrics.tp1_hit_rate}%)")
         table.add_row("  TP2 Hit", f"[green]{metrics.tp2_count}[/green] ({metrics.tp2_hit_rate}%)")
-        table.add_row("  TP3 Hit", f"[green]{metrics.tp3_count}[/green] ({metrics.tp3_hit_rate}%)")
         
         table.add_row("", "")
         table.add_row("[bold]SL Outcomes[/bold]", "")

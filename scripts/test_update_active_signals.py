@@ -110,13 +110,11 @@ def update_active_signals_with_keyboard():
                 # TP/SL hit durumlarını al
                 tp_hits_dict = {
                     1: signal.get('tp1_hit', 0) == 1,
-                    2: signal.get('tp2_hit', 0) == 1,
-                    3: signal.get('tp3_hit', 0) == 1
+                    2: signal.get('tp2_hit', 0) == 1
                 }
                 tp_hit_times = {
                     1: signal.get('tp1_hit_at'),
-                    2: signal.get('tp2_hit_at'),
-                    3: signal.get('tp3_hit_at')
+                    2: signal.get('tp2_hit_at')
                 }
                 
                 sl_hits_dict = {

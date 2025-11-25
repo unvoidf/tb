@@ -59,7 +59,6 @@ class SignalRepository(BaseRepository):
         telegram_channel_id: Optional[str] = None,
         tp1_price: Optional[float] = None,
         tp2_price: Optional[float] = None,
-        tp3_price: Optional[float] = None,
         sl_price: Optional[float] = None,
         signal_data: Optional[Dict] = None,
         entry_levels: Optional[Dict] = None,
@@ -67,7 +66,6 @@ class SignalRepository(BaseRepository):
         market_context: Optional[str] = None,
         tp1_distance_r: Optional[float] = None,
         tp2_distance_r: Optional[float] = None,
-        tp3_distance_r: Optional[float] = None,
         sl_distance_r: Optional[float] = None,
         optimal_entry_price: Optional[float] = None,
         conservative_entry_price: Optional[float] = None
@@ -85,7 +83,7 @@ class SignalRepository(BaseRepository):
             timeframe: Timeframe
             telegram_message_id: Telegram message ID
             telegram_channel_id: Telegram channel ID
-            tp1_price, tp2_price, tp3_price: TP levels
+            tp1_price, tp2_price: TP levels
             sl_price: Stop-loss level
             signal_data: Signal data dict (will be converted to JSON)
             entry_levels: Entry levels dict (will be converted to JSON)
@@ -131,22 +129,22 @@ class SignalRepository(BaseRepository):
                     INSERT INTO signals (
                         signal_id, symbol, direction, signal_price, confidence,
                         atr, timeframe, telegram_message_id, telegram_channel_id,
-                        created_at, tp1_price, tp2_price, tp3_price,
+                        created_at, tp1_price, tp2_price,
                         sl_price,
                         signal_data, entry_levels,
                         signal_score_breakdown, market_context,
-                        tp1_distance_r, tp2_distance_r, tp3_distance_r,
+                        tp1_distance_r, tp2_distance_r,
                         sl_distance_r,
                         optimal_entry_price, conservative_entry_price
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     signal_id, symbol, direction, signal_price, confidence,
                     atr, timeframe, telegram_message_id, telegram_channel_id,
-                    created_at, tp1_price, tp2_price, tp3_price,
+                    created_at, tp1_price, tp2_price,
                     sl_price,
                     signal_data_json, entry_levels_json,
                     signal_score_breakdown, market_context,
-                    tp1_distance_r, tp2_distance_r, tp3_distance_r,
+                    tp1_distance_r, tp2_distance_r,
                     sl_distance_r,
                     optimal_entry_price, conservative_entry_price
                 ))
@@ -182,7 +180,6 @@ class SignalRepository(BaseRepository):
             'telegram_channel_id': data.get('telegram_channel_id', ''),
             'tp1_price': data.get('tp1_price'),
             'tp2_price': data.get('tp2_price'),
-            'tp3_price': data.get('tp3_price'),
             'sl_price': data.get('sl_price'),
             'signal_data': signal_data,
             'entry_levels': entry_levels,
@@ -190,7 +187,6 @@ class SignalRepository(BaseRepository):
             'market_context': data.get('market_context'),
             'tp1_distance_r': data.get('tp1_distance_r', data.get('tp1_r')),
             'tp2_distance_r': data.get('tp2_distance_r', data.get('tp2_r')),
-            'tp3_distance_r': data.get('tp3_distance_r', data.get('tp3_r')),
             'sl_distance_r': data.get('sl_distance_r', data.get('sl_r')),
             'optimal_entry_price': data.get('optimal_entry_price'),
             'conservative_entry_price': data.get('conservative_entry_price')
@@ -387,7 +383,7 @@ class SignalRepository(BaseRepository):
         
         Args:
             signal_id: Signal ID
-            tp_level: TP level (1, 2, or 3)
+        tp_level: TP level (1 or 2)
             hit_at: Hit time (Unix timestamp, current time if None)
             
         Returns:
@@ -411,12 +407,6 @@ class SignalRepository(BaseRepository):
                         UPDATE signals
                         SET tp2_hit = 1, tp2_hit_at = ?
                         WHERE signal_id = ? AND tp2_hit = 0
-                    """, (hit_at, signal_id))
-                elif tp_level == 3:
-                    cursor.execute("""
-                        UPDATE signals
-                        SET tp3_hit = 1, tp3_hit_at = ?
-                        WHERE signal_id = ? AND tp3_hit = 0
                     """, (hit_at, signal_id))
                 else:
                     self.logger.warning(f"Invalid TP level: {tp_level}")
@@ -818,7 +808,7 @@ class SignalRepository(BaseRepository):
         Args:
             signal_id: Signal ID
             final_price: Signal closing price
-            final_outcome: 'tp1_reached', 'tp2_reached', 'tp3_reached',
+            final_outcome: 'tp1_reached', 'tp2_reached',
                           'sl_hit', 'expired_no_target'
             
         Returns:
@@ -1006,11 +996,11 @@ class SignalRepository(BaseRepository):
                     INSERT INTO signal_metrics_summary (
                         period_start, period_end,
                         total_signals, long_signals, short_signals, neutral_filtered,
-                        avg_confidence, tp1_hit_rate, tp2_hit_rate, tp3_hit_rate,
+                        avg_confidence, tp1_hit_rate, tp2_hit_rate,
                         sl_hit_rate,
                         avg_mfe_percent, avg_mae_percent,
                         avg_time_to_first_target_hours, market_regime, metrics_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     period_start, period_end,
                     metrics.get('total_signals', 0),
@@ -1020,7 +1010,6 @@ class SignalRepository(BaseRepository):
                     metrics.get('avg_confidence', 0.0),
                     metrics.get('tp1_hit_rate', 0.0),
                     metrics.get('tp2_hit_rate', 0.0),
-                    metrics.get('tp3_hit_rate', 0.0),
                     metrics.get('sl_hit_rate', 0.0),
                     metrics.get('avg_mfe_percent', 0.0),
                     metrics.get('avg_mae_percent', 0.0),

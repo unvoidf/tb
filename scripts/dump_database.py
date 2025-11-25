@@ -78,12 +78,6 @@ def dump_database(db_path: str = "data/signals.db", output_path: str = "signals_
                 if signal['tp2_hit_at']:
                     f.write(f"    Hit At: {format_timestamp(signal['tp2_hit_at'])}\n")
                 
-                tp3_str = f"${signal['tp3_price']:.4f}" if signal['tp3_price'] else 'N/A'
-                f.write(f"  TP3: {tp3_str}\n")
-                f.write(f"    Hit: {'Evet' if signal['tp3_hit'] else 'Hayır'}\n")
-                if signal['tp3_hit_at']:
-                    f.write(f"    Hit At: {format_timestamp(signal['tp3_hit_at'])}\n")
-                
                 f.write(f"\nStop Loss Seviyeleri:\n")
                 sl_price = signal.get('sl_price')
                 sl_str = f"${sl_price:.4f}" if sl_price else 'N/A'
@@ -98,8 +92,6 @@ def dump_database(db_path: str = "data/signals.db", output_path: str = "signals_
                     f.write(f"  TP1 Distance: {signal['tp1_distance_r']:.2f}R\n")
                     if 'tp2_distance_r' in signal.keys() and signal['tp2_distance_r']:
                         f.write(f"  TP2 Distance: {signal['tp2_distance_r']:.2f}R\n")
-                    if 'tp3_distance_r' in signal.keys() and signal['tp3_distance_r']:
-                        f.write(f"  TP3 Distance: {signal['tp3_distance_r']:.2f}R\n")
                     if 'sl_distance_r' in signal.keys() and signal['sl_distance_r']:
                         f.write(f"  SL Distance: {signal['sl_distance_r']:.2f}R\n")
                 
@@ -272,9 +264,6 @@ def dump_database(db_path: str = "data/signals.db", output_path: str = "signals_
                 
                 tp2_rate = f"{summary['tp2_hit_rate']*100:.2f}%" if summary['tp2_hit_rate'] else 'N/A'
                 f.write(f"  TP2 Hit Rate: {tp2_rate}\n")
-                
-                tp3_rate = f"{summary['tp3_hit_rate']*100:.2f}%" if summary['tp3_hit_rate'] else 'N/A'
-                f.write(f"  TP3 Hit Rate: {tp3_rate}\n")
                 
                 sl_rate = f"{summary['sl_hit_rate']*100:.2f}%" if summary.get('sl_hit_rate') else 'N/A'
                 f.write(f"  SL Hit Rate: {sl_rate}\n")

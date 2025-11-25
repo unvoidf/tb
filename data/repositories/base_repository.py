@@ -101,7 +101,6 @@ class BaseRepository:
         r_aliases = {
             'tp1_distance_r': 'tp1_r',
             'tp2_distance_r': 'tp2_r',
-            'tp3_distance_r': 'tp3_r',
             'sl_distance_r': 'sl_r'
         }
         for src, alias in r_aliases.items():

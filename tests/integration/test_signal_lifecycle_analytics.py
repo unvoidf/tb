@@ -56,7 +56,6 @@ def test_complete_signal_lifecycle(repository):
         'confidence': 0.85,
         'tp1_price': 51000.0,
         'tp2_price': 52000.0,
-        'tp3_price': 53000.0,
         'sl_price': 49000.0,
         'optimal_entry_price': 49800.0,
         'conservative_entry_price': 49700.0,
@@ -74,7 +73,6 @@ def test_complete_signal_lifecycle(repository):
         }),
         'tp1_r': 2.0,
         'tp2_r': 4.0,
-        'tp3_r': 6.0,
         'sl_r': -2.0
     }
     repository.save_signal(signal_data)
@@ -204,7 +202,6 @@ def test_signal_with_all_analytics_fields(repository):
         'confidence': 0.88,
         'tp1_price': 310.0,
         'tp2_price': 320.0,
-        'tp3_price': 330.0,
         'sl_price': 290.0,
         'optimal_entry_price': 298.0,
         'conservative_entry_price': 296.0,
@@ -225,7 +222,6 @@ def test_signal_with_all_analytics_fields(repository):
         }),
         'tp1_r': 2.0,
         'tp2_r': 4.0,
-        'tp3_r': 6.0,
         'sl_r': -2.0
     }
     

@@ -194,7 +194,7 @@ class SignalFormatter(BaseFormatter):
                 stop_info = custom_targets.get('stop_loss', {})
                 sl_price_ranging = stop_info.get('price')
                 
-                for idx, key in enumerate(['tp1', 'tp2', 'tp3'], start=1):
+                for idx, key in enumerate(['tp1', 'tp2'], start=1):
                     target_info = custom_targets.get(key)
                     if not target_info:
                         continue

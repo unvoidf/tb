@@ -11,8 +11,7 @@ import time
 
 class SignalOutcome(Enum):
     """Signal outcome classification."""
-    TP3_REACHED = "TP3_REACHED"      # Hit TP3
-    TP2_REACHED = "TP2_REACHED"      # Hit TP2 (but not TP3)
+    TP2_REACHED = "TP2_REACHED"      # Hit TP2 (highest target)
     TP1_ONLY = "TP1_ONLY"            # Hit TP1 only
     SL_HIT = "SL_HIT"                # Stop-loss hit
     OPEN = "OPEN"                     # Still open (no TP/SL hit)
@@ -42,7 +41,6 @@ class PerformanceMetrics:
     total_signals: int
     
     # Outcome distribution
-    tp3_count: int = 0
     tp2_count: int = 0
     tp1_count: int = 0
     sl_count: int = 0
@@ -50,10 +48,9 @@ class PerformanceMetrics:
     expired_count: int = 0
     
     # Win rates
-    win_rate: float = 0.0  # (TP1+TP2+TP3) / total_closed
+    win_rate: float = 0.0  # (TP1+TP2) / total_closed
     tp1_hit_rate: float = 0.0
     tp2_hit_rate: float = 0.0
-    tp3_hit_rate: float = 0.0
     sl_hit_rate: float = 0.0
     
     # R-multiples
@@ -143,8 +140,6 @@ class SignalAnalyzer:
             return SignalOutcome.SL_HIT
         
         # Check TP hits (in order of priority)
-        if signal.get('tp3_hit'):
-            return SignalOutcome.TP3_REACHED
         if signal.get('tp2_hit'):
             return SignalOutcome.TP2_REACHED
         if signal.get('tp1_hit'):
@@ -209,9 +204,7 @@ class SignalAnalyzer:
         outcome: SignalOutcome
     ) -> Optional[float]:
         """Gets exit price based on outcome."""
-        if outcome == SignalOutcome.TP3_REACHED:
-            return signal.get('tp3_price')
-        elif outcome == SignalOutcome.TP2_REACHED:
+        if outcome == SignalOutcome.TP2_REACHED:
             return signal.get('tp2_price')
         elif outcome == SignalOutcome.TP1_ONLY:
             return signal.get('tp1_price')
@@ -232,8 +225,8 @@ class SignalAnalyzer:
         
         # Get exit timestamp based on outcome
         exit_time = None
-        if outcome in [SignalOutcome.TP3_REACHED, SignalOutcome.TP2_REACHED]:
-            exit_time = signal.get('tp2_hit_at') or signal.get('tp3_hit_at')
+        if outcome == SignalOutcome.TP2_REACHED:
+            exit_time = signal.get('tp2_hit_at')
         elif outcome == SignalOutcome.TP1_ONLY:
             exit_time = signal.get('tp1_hit_at')
         elif outcome == SignalOutcome.SL_HIT:
@@ -280,7 +273,6 @@ class SignalAnalyzer:
         total = len(self.signal_stats)
         
         # Count outcomes
-        tp3_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.TP3_REACHED)
         tp2_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.TP2_REACHED)
         tp1_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.TP1_ONLY)
         sl_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.SL_HIT)
@@ -289,14 +281,13 @@ class SignalAnalyzer:
         
         # Closed signals (exclude OPEN)
         closed_count = total - open_count
-        wins = tp1_count + tp2_count + tp3_count
+        wins = tp1_count + tp2_count
         losses = sl_count
         
         # Win rates
         win_rate = (wins / closed_count * 100) if closed_count > 0 else 0.0
         tp1_hit_rate = (tp1_count / total * 100) if total > 0 else 0.0
         tp2_hit_rate = (tp2_count / total * 100) if total > 0 else 0.0
-        tp3_hit_rate = (tp3_count / total * 100) if total > 0 else 0.0
         sl_hit_rate = (losses / closed_count * 100) if closed_count > 0 else 0.0
         
         # R-multiples
@@ -314,7 +305,7 @@ class SignalAnalyzer:
         avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0.0
         
         tp_times = [s.hold_time_hours for s in self.signal_stats 
-                    if s.hold_time_hours and s.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED, SignalOutcome.TP3_REACHED]]
+                    if s.hold_time_hours and s.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED]]
         avg_tp_time = sum(tp_times) / len(tp_times) if tp_times else 0.0
         
         sl_times = [s.hold_time_hours for s in self.signal_stats 
@@ -329,7 +320,6 @@ class SignalAnalyzer:
         
         return PerformanceMetrics(
             total_signals=total,
-            tp3_count=tp3_count,
             tp2_count=tp2_count,
             tp1_count=tp1_count,
             sl_count=sl_count,
@@ -338,7 +328,6 @@ class SignalAnalyzer:
             win_rate=round(win_rate, 2),
             tp1_hit_rate=round(tp1_hit_rate, 2),
             tp2_hit_rate=round(tp2_hit_rate, 2),
-            tp3_hit_rate=round(tp3_hit_rate, 2),
             sl_hit_rate=round(sl_hit_rate, 2),
             avg_r_multiple=round(avg_r, 3),
             avg_win_r=round(avg_win_r, 3),

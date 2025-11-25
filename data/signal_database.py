@@ -72,13 +72,10 @@ class SignalDatabase:
                         created_at INTEGER NOT NULL,
                         tp1_price REAL,
                         tp2_price REAL,
-                        tp3_price REAL,
                         tp1_hit INTEGER DEFAULT 0,
                         tp2_hit INTEGER DEFAULT 0,
-                        tp3_hit INTEGER DEFAULT 0,
                         tp1_hit_at INTEGER,
                         tp2_hit_at INTEGER,
-                        tp3_hit_at INTEGER,
                         sl_price REAL,
                         sl_hit INTEGER DEFAULT 0,
                         sl_hit_at INTEGER,
@@ -125,7 +122,7 @@ class SignalDatabase:
                     pass
                 
                 # Migration: R-based distances columns
-                for col in ['tp1_distance_r REAL', 'tp2_distance_r REAL', 'tp3_distance_r REAL', 'sl_distance_r REAL']:
+                for col in ['tp1_distance_r REAL', 'tp2_distance_r REAL', 'sl_distance_r REAL']:
                     try:
                         cursor.execute(f"ALTER TABLE signals ADD COLUMN {col}")
                         self.logger.info(f"{col.split()[0]} column added (migration)")
@@ -186,7 +183,6 @@ class SignalDatabase:
                         avg_confidence REAL,
                         tp1_hit_rate REAL,
                         tp2_hit_rate REAL,
-                        tp3_hit_rate REAL,
                         sl_hit_rate REAL,
                         avg_mfe_percent REAL,
                         avg_mae_percent REAL,
@@ -208,7 +204,7 @@ class SignalDatabase:
                     CREATE INDEX IF NOT EXISTS idx_telegram_message_id ON signals(telegram_message_id)
                 """)
                 cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_active_signals ON signals(tp1_hit, tp2_hit, tp3_hit, sl_hit)
+                    CREATE INDEX IF NOT EXISTS idx_active_signals ON signals(tp1_hit, tp2_hit, sl_hit)
                 """)
                 
                 conn.commit()

@@ -876,9 +876,27 @@ class SignalScannerManager:
         tp_levels = {}
         sl_levels = {}
         
-        if 'tp' in custom_targets:
-            for k, v in custom_targets['tp'].items():
-                tp_levels[k] = v
+        processed_levels = 0
+        tp_section = custom_targets.get('tp')
+        if isinstance(tp_section, dict):
+            for key, value in tp_section.items():
+                if processed_levels >= 2:
+                    break
+                normalized_key = 'tp1_price' if '1' in key else 'tp2_price'
+                extracted_price = value.get('price') if isinstance(value, dict) else value
+                if extracted_price is not None:
+                    tp_levels[normalized_key] = extracted_price
+                    processed_levels += 1
+        
+        if processed_levels < 2:
+            for simple_key in ['tp1', 'tp2']:
+                if processed_levels >= 2:
+                    break
+                target_info = custom_targets.get(simple_key) or {}
+                price = target_info.get('price')
+                if price is not None:
+                    tp_levels[f'{simple_key}_price'] = price
+                    processed_levels += 1
                 
         if 'sl' in custom_targets:
             stop_loss = custom_targets['sl'].get('stop_loss')
@@ -995,7 +1013,6 @@ class SignalScannerManager:
                     direction=direction,
                     tp1=tp_sl_levels.get('tp1_price'),
                     tp2=tp_sl_levels.get('tp2_price'),
-                    tp3=tp_sl_levels.get('tp3_price'),
                     sl_price=tp_sl_levels.get('sl_price')
                 )
             
@@ -1025,7 +1042,6 @@ class SignalScannerManager:
                 telegram_channel_id=telegram_channel_id,
                 tp1_price=tp_sl_levels.get('tp1_price'),
                 tp2_price=tp_sl_levels.get('tp2_price'),
-                tp3_price=tp_sl_levels.get('tp3_price'),
                 sl_price=tp_sl_levels.get('sl_price'),
                 signal_data=signal_data,
                 entry_levels=entry_levels,
@@ -1033,7 +1049,6 @@ class SignalScannerManager:
                 market_context=json.dumps(market_context) if market_context else None,
                 tp1_distance_r=r_distances.get('tp1_distance_r'),
                 tp2_distance_r=r_distances.get('tp2_distance_r'),
-                tp3_distance_r=r_distances.get('tp3_distance_r'),
                 sl_distance_r=r_distances.get('sl_distance_r'),
                 optimal_entry_price=optimal_entry,
                 conservative_entry_price=conservative_entry

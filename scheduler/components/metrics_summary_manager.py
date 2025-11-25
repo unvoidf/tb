@@ -61,7 +61,6 @@ class MetricsSummaryManager:
         # TP/SL hit rates
         tp1_hit_rate = sum(1 for s in signals if s.get('tp1_hit')) / total if total else 0
         tp2_hit_rate = sum(1 for s in signals if s.get('tp2_hit')) / total if total else 0
-        tp3_hit_rate = sum(1 for s in signals if s.get('tp3_hit')) / total if total else 0
         sl_hit_rate = sum(1 for s in signals if s.get('sl_hit')) / total if total else 0
         
         # MFE/MAE ortalama (sadece var olanlar)
@@ -102,7 +101,6 @@ class MetricsSummaryManager:
             'avg_confidence': avg_confidence,
             'tp1_hit_rate': tp1_hit_rate,
             'tp2_hit_rate': tp2_hit_rate,
-            'tp3_hit_rate': tp3_hit_rate,
             'sl_hit_rate': sl_hit_rate,
             'avg_mfe_percent': avg_mfe,
             'avg_mae_percent': avg_mae,

@@ -18,7 +18,7 @@ def test_calculate_r_distances_long(calculator):
     # Arrange
     signal_price = 100.0
     direction = 'LONG'
-    tp_levels = {'tp1': 105.0, 'tp2': 110.0, 'tp3': 115.0}
+    tp_levels = {'tp1': 105.0, 'tp2': 110.0}
     sl_price = 96.0
     
     # Act
@@ -30,10 +30,8 @@ def test_calculate_r_distances_long(calculator):
     # SL2 risk = 100 - 96 = 4
     # TP1 = (105-100)/4 = 1.25R
     # TP2 = (110-100)/4 = 2.5R
-    # TP3 = (115-100)/4 = 3.75R
     assert abs(r_distances['tp1_r'] - 1.25) < 0.01
     assert abs(r_distances['tp2_r'] - 2.5) < 0.01
-    assert abs(r_distances['tp3_r'] - 3.75) < 0.01
     assert abs(r_distances['sl_r'] - (-1.0)) < 0.01
 
 
@@ -42,7 +40,7 @@ def test_calculate_r_distances_short(calculator):
     # Arrange
     signal_price = 100.0
     direction = 'SHORT'
-    tp_levels = {'tp1': 95.0, 'tp2': 90.0, 'tp3': 85.0}
+    tp_levels = {'tp1': 95.0, 'tp2': 90.0}
     sl_price = 104.0
     
     # Act
@@ -54,9 +52,7 @@ def test_calculate_r_distances_short(calculator):
     # SL2 risk = 104 - 100 = 4
     # TP1 = (100-95)/4 = 1.25R
     # TP2 = (100-90)/4 = 2.5R
-    # TP3 = (100-85)/4 = 3.75R
     assert abs(r_distances['tp1_r'] - 1.25) < 0.01
     assert abs(r_distances['tp2_r'] - 2.5) < 0.01
-    assert abs(r_distances['tp3_r'] - 3.75) < 0.01
     assert abs(r_distances['sl_r'] - (-1.0)) < 0.01
 

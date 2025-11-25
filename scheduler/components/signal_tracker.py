@@ -435,13 +435,11 @@ class SignalTracker:
             # TP hit durumlarını dict'e çevir
             tp_hits_dict = {
                 1: updated_signal.get('tp1_hit', 0) == 1,
-                2: updated_signal.get('tp2_hit', 0) == 1,
-                3: updated_signal.get('tp3_hit', 0) == 1
+                2: updated_signal.get('tp2_hit', 0) == 1
             }
             tp_hit_times = {
                 1: updated_signal.get('tp1_hit_at'),
-                2: updated_signal.get('tp2_hit_at'),
-                3: updated_signal.get('tp3_hit_at')
+                2: updated_signal.get('tp2_hit_at')
             }
             
             # SL hit durumlarını dict'e çevir
@@ -629,8 +627,6 @@ class SignalTracker:
         Returns:
             Final outcome string
         """
-        if signal.get('tp3_hit'):
-            return 'tp3_reached'
         if signal.get('tp2_hit'):
             return 'tp2_reached'
         if signal.get('tp1_hit'):

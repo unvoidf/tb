@@ -19,7 +19,6 @@ class RiskRewardCalculator:
         direction: str,
         tp1: Optional[float],
         tp2: Optional[float],
-        tp3: Optional[float],
         sl_price: Optional[float]
     ) -> Dict[str, Optional[float]]:
         """
@@ -29,14 +28,13 @@ class RiskRewardCalculator:
         Args:
             signal_price: Signal price
             direction: LONG/SHORT
-            tp1, tp2, tp3: TP levels
+            tp1, tp2: TP levels
             sl_price: Stop-loss level
             
         Returns:
             {
                 'tp1_distance_r': float,
                 'tp2_distance_r': float,
-                'tp3_distance_r': float,
                 'sl_distance_r': float
             }
         """
@@ -45,7 +43,6 @@ class RiskRewardCalculator:
             return {
                 'tp1_distance_r': None,
                 'tp2_distance_r': None,
-                'tp3_distance_r': None,
                 'sl_distance_r': None
             }
         
@@ -55,7 +52,6 @@ class RiskRewardCalculator:
             return {
                 'tp1_distance_r': None,
                 'tp2_distance_r': None,
-                'tp3_distance_r': None,
                 'sl_distance_r': None
             }
         
@@ -77,7 +73,6 @@ class RiskRewardCalculator:
         result = {
             'tp1_distance_r': calc_r(tp1, True),
             'tp2_distance_r': calc_r(tp2, True),
-            'tp3_distance_r': calc_r(tp3, True),
             'sl_distance_r': calc_r(sl_price, False)
         }
 
@@ -85,13 +80,12 @@ class RiskRewardCalculator:
             return f"{value:.2f}R" if value is not None else "None"
 
         self.logger.debug(
-            "R distances: signal=%s, direction=%s, R=%.6f, TP1=%s, TP2=%s, TP3=%s, SL=%s",
+            "R distances: signal=%s, direction=%s, R=%.6f, TP1=%s, TP2=%s, SL=%s",
             signal_price,
             direction,
             r,
             _format_r(result['tp1_distance_r']),
             _format_r(result['tp2_distance_r']),
-            _format_r(result['tp3_distance_r']),
             _format_r(result['sl_distance_r'])
         )
         

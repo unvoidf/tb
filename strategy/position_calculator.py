@@ -191,17 +191,14 @@ class PositionCalculator:
             stop_loss = entry - (SL_MULTIPLIER * atr)
             tp1 = entry + (2 * atr)
             tp2 = entry + (3.236 * atr)
-            tp3 = entry + (5.236 * atr)
         else:
             stop_loss = entry + (SL_MULTIPLIER * atr)
             tp1 = entry - (2 * atr)
             tp2 = entry - (3.236 * atr)
-            tp3 = entry - (5.236 * atr)
         
         targets = [
             {'price': tp1, 'risk_reward': 1.0},
-            {'price': tp2, 'risk_reward': 1.618},
-            {'price': tp3, 'risk_reward': 2.618}
+            {'price': tp2, 'risk_reward': 1.618}
         ]
         
         return {
@@ -273,7 +270,7 @@ class PositionCalculator:
         """Creates target list from custom target dict."""
         targets = []
         
-        for key in ['tp1', 'tp2', 'tp3']:
+        for key in ['tp1', 'tp2']:
             target_info = custom_targets.get(key)
             if not target_info:
                 continue
@@ -325,24 +322,24 @@ class PositionCalculator:
         Args:
             signal_price: Signal price
             direction: LONG or SHORT
-            tp_levels: {'tp1': price, 'tp2': price, 'tp3': price}
+        tp_levels: {'tp1': price, 'tp2': price}
             sl_price: Stop-loss level
             
         Returns:
-            {'tp1_r': float, 'tp2_r': float, 'tp3_r': float, 'sl_r': float}
+            {'tp1_r': float, 'tp2_r': float, 'sl_r': float}
         """
         if sl_price is None:
-            return {'tp1_r': 0, 'tp2_r': 0, 'tp3_r': 0, 'sl_r': 0}
+            return {'tp1_r': 0, 'tp2_r': 0, 'sl_r': 0}
         
         risk = abs(signal_price - sl_price)
         
         if risk == 0:
-            return {'tp1_r': 0, 'tp2_r': 0, 'tp3_r': 0, 'sl_r': 0}
+            return {'tp1_r': 0, 'tp2_r': 0, 'sl_r': 0}
         
         result = {}
         
         # TP R distances
-        for level in ['tp1', 'tp2', 'tp3']:
+        for level in ['tp1', 'tp2']:
             tp_price = tp_levels.get(level)
             if tp_price is not None:
                 if direction == 'LONG':

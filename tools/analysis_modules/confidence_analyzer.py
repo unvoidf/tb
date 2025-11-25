@@ -93,8 +93,7 @@ class ConfidenceAnalyzer:
             # Calculate metrics
             wins = sum(1 for s in band_signals 
                       if s.outcome in [SignalOutcome.TP1_ONLY, 
-                                      SignalOutcome.TP2_REACHED, 
-                                      SignalOutcome.TP3_REACHED])
+                                      SignalOutcome.TP2_REACHED])
             
             losses = sum(1 for s in band_signals 
                         if s.outcome == SignalOutcome.SL_HIT)
@@ -108,8 +107,7 @@ class ConfidenceAnalyzer:
             # TP rate (any TP hit)
             tp_count = sum(1 for s in band_signals 
                           if s.outcome in [SignalOutcome.TP1_ONLY, 
-                                          SignalOutcome.TP2_REACHED, 
-                                          SignalOutcome.TP3_REACHED])
+                                          SignalOutcome.TP2_REACHED])
             tp_rate = (tp_count / len(band_signals) * 100) if band_signals else 0.0
             
             # Average R-multiple
@@ -295,8 +293,7 @@ class ConfidenceAnalyzer:
         
         for sig in closed:
             if sig.outcome in [SignalOutcome.TP1_ONLY, 
-                              SignalOutcome.TP2_REACHED, 
-                              SignalOutcome.TP3_REACHED]:
+                              SignalOutcome.TP2_REACHED]:
                 outcomes.append(1)
             else:
                 outcomes.append(0)
@@ -337,8 +334,7 @@ class ConfidenceAnalyzer:
             
             wins = sum(1 for s in signals 
                       if s.outcome in [SignalOutcome.TP1_ONLY, 
-                                      SignalOutcome.TP2_REACHED, 
-                                      SignalOutcome.TP3_REACHED])
+                                      SignalOutcome.TP2_REACHED])
             
             win_rate = (wins / len(signals) * 100) if signals else 0.0
             
