@@ -73,23 +73,11 @@ class SimulationEngine:
                     'price': signal['tp1_price']
                 })
             
-            if signal.get('sl1_hit') and signal.get('sl1_hit_at'):
+            if signal.get('sl_hit') and signal.get('sl_hit_at'):
                 possible_exits.append({
                     'type': 'EXIT_SL',
-                    'time': signal['sl1_hit_at'],
-                    'price': signal['sl1_price']
-                })
-            elif signal.get('sl1_5_hit') and signal.get('sl1_5_hit_at'):
-                possible_exits.append({
-                    'type': 'EXIT_SL',
-                    'time': signal['sl1_5_hit_at'],
-                    'price': signal['sl1_5_price']
-                })
-            elif signal.get('sl2_hit') and signal.get('sl2_hit_at'):
-                possible_exits.append({
-                    'type': 'EXIT_SL',
-                    'time': signal['sl2_hit_at'],
-                    'price': signal['sl2_price']
+                    'time': signal['sl_hit_at'],
+                    'price': signal.get('sl_price')
                 })
             
             # Select the exit that happened first
@@ -131,7 +119,7 @@ class SimulationEngine:
         risk_amount = self.portfolio.balance * (self.risk_per_trade / 100)
         entry_price = signal['signal_price']
         
-        sl_price = signal.get('sl2_price') or signal.get('sl1_price')
+        sl_price = signal.get('sl_price')
         if not sl_price:
             sl_price = entry_price * 0.95 if direction == 'LONG' else entry_price * 1.05
         
@@ -451,9 +439,7 @@ class SimulationEngine:
             1 for signal in self.signals
             if not (
                 (signal.get('tp1_hit') and signal.get('tp1_hit_at')) or
-                (signal.get('sl1_hit') and signal.get('sl1_hit_at')) or
-                (signal.get('sl1_5_hit') and signal.get('sl1_5_hit_at')) or
-                (signal.get('sl2_hit') and signal.get('sl2_hit_at'))
+                (signal.get('sl_hit') and signal.get('sl_hit_at'))
             )
         )
         summary['open_signals_from_db'] = open_signals_count

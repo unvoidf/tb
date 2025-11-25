@@ -79,15 +79,9 @@ class SignalDatabase:
                         tp1_hit_at INTEGER,
                         tp2_hit_at INTEGER,
                         tp3_hit_at INTEGER,
-                        sl1_price REAL,
-                        sl1_5_price REAL,
-                        sl2_price REAL,
-                        sl1_hit INTEGER DEFAULT 0,
-                        sl1_5_hit INTEGER DEFAULT 0,
-                        sl2_hit INTEGER DEFAULT 0,
-                        sl1_hit_at INTEGER,
-                        sl1_5_hit_at INTEGER,
-                        sl2_hit_at INTEGER,
+                        sl_price REAL,
+                        sl_hit INTEGER DEFAULT 0,
+                        sl_hit_at INTEGER,
                         signal_data TEXT,
                         entry_levels TEXT,
                         message_deleted INTEGER DEFAULT 0
@@ -131,7 +125,7 @@ class SignalDatabase:
                     pass
                 
                 # Migration: R-based distances columns
-                for col in ['tp1_distance_r REAL', 'tp2_distance_r REAL', 'tp3_distance_r REAL', 'sl1_distance_r REAL', 'sl2_distance_r REAL']:
+                for col in ['tp1_distance_r REAL', 'tp2_distance_r REAL', 'tp3_distance_r REAL', 'sl_distance_r REAL']:
                     try:
                         cursor.execute(f"ALTER TABLE signals ADD COLUMN {col}")
                         self.logger.info(f"{col.split()[0]} column added (migration)")
@@ -164,12 +158,14 @@ class SignalDatabase:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS rejected_signals (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        signal_id TEXT,
                         symbol TEXT NOT NULL,
                         direction TEXT NOT NULL,
                         confidence REAL NOT NULL,
                         signal_price REAL NOT NULL,
                         created_at INTEGER NOT NULL,
                         rejection_reason TEXT NOT NULL,
+                        rejected_reason TEXT,
                         score_breakdown TEXT,
                         market_context TEXT
                     )
@@ -191,12 +187,12 @@ class SignalDatabase:
                         tp1_hit_rate REAL,
                         tp2_hit_rate REAL,
                         tp3_hit_rate REAL,
-                        sl1_hit_rate REAL,
-                        sl2_hit_rate REAL,
+                        sl_hit_rate REAL,
                         avg_mfe_percent REAL,
                         avg_mae_percent REAL,
                         avg_time_to_first_target_hours REAL,
-                        market_regime TEXT
+                        market_regime TEXT,
+                        metrics_json TEXT
                     )
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_summary_period ON signal_metrics_summary(period_start, period_end)")
@@ -212,7 +208,7 @@ class SignalDatabase:
                     CREATE INDEX IF NOT EXISTS idx_telegram_message_id ON signals(telegram_message_id)
                 """)
                 cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_active_signals ON signals(tp1_hit, tp2_hit, tp3_hit, sl1_hit, sl1_5_hit, sl2_hit)
+                    CREATE INDEX IF NOT EXISTS idx_active_signals ON signals(tp1_hit, tp2_hit, tp3_hit, sl_hit)
                 """)
                 
                 conn.commit()

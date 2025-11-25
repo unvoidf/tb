@@ -317,7 +317,7 @@ class PositionCalculator:
         signal_price: float,
         direction: str,
         tp_levels: Dict,
-        sl_levels: Dict
+        sl_price: Optional[float]
     ) -> Dict:
         """
         Calculates R-based distances (normalized relative to SL2).
@@ -326,17 +326,18 @@ class PositionCalculator:
             signal_price: Signal price
             direction: LONG or SHORT
             tp_levels: {'tp1': price, 'tp2': price, 'tp3': price}
-            sl_levels: {'sl1': price, 'sl2': price, 'sl3': price}
+            sl_price: Stop-loss level
             
         Returns:
-            {'tp1_r': float, 'tp2_r': float, 'tp3_r': float, 'sl1_r': float, 'sl2_r': float}
+            {'tp1_r': float, 'tp2_r': float, 'tp3_r': float, 'sl_r': float}
         """
-        # Risk = SL2 distance
-        sl2_price = sl_levels.get('sl2', sl_levels.get('sl1', signal_price))
-        risk = abs(signal_price - sl2_price)
+        if sl_price is None:
+            return {'tp1_r': 0, 'tp2_r': 0, 'tp3_r': 0, 'sl_r': 0}
+        
+        risk = abs(signal_price - sl_price)
         
         if risk == 0:
-            return {'tp1_r': 0, 'tp2_r': 0, 'tp3_r': 0, 'sl1_r': 0, 'sl2_r': 0}
+            return {'tp1_r': 0, 'tp2_r': 0, 'tp3_r': 0, 'sl_r': 0}
         
         result = {}
         
@@ -352,17 +353,12 @@ class PositionCalculator:
             else:
                 result[f'{level}_r'] = 0
         
-        # SL R distances (negative)
-        for level in ['sl1', 'sl2']:
-            sl_price = sl_levels.get(level)
-            if sl_price is not None:
-                if direction == 'LONG':
-                    distance = sl_price - signal_price
-                else:  # SHORT
-                    distance = signal_price - sl_price
-                result[f'{level}_r'] = distance / risk
-            else:
-                result[f'{level}_r'] = 0
+        # Single SL distance (negative)
+        if direction == 'LONG':
+            distance = sl_price - signal_price
+        else:
+            distance = signal_price - sl_price
+        result['sl_r'] = distance / risk
         
         return result
 

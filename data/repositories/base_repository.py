@@ -94,6 +94,20 @@ class BaseRepository:
             except Exception:
                 result['entry_levels'] = {}
         
+        # Keep backwards-compatible alias for score_breakdown
+        if result.get('signal_score_breakdown') and 'score_breakdown' not in result:
+            result['score_breakdown'] = result['signal_score_breakdown']
+        
+        r_aliases = {
+            'tp1_distance_r': 'tp1_r',
+            'tp2_distance_r': 'tp2_r',
+            'tp3_distance_r': 'tp3_r',
+            'sl_distance_r': 'sl_r'
+        }
+        for src, alias in r_aliases.items():
+            if src in result and alias not in result:
+                result[alias] = result[src]
+        
         # signal_log JSON parse
         if result.get('signal_log'):
             try:

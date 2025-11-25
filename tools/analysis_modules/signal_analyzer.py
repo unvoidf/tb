@@ -14,9 +14,7 @@ class SignalOutcome(Enum):
     TP3_REACHED = "TP3_REACHED"      # Hit TP3
     TP2_REACHED = "TP2_REACHED"      # Hit TP2 (but not TP3)
     TP1_ONLY = "TP1_ONLY"            # Hit TP1 only
-    SL2_HIT = "SL2_HIT"              # Hit SL2 (liquidation)
-    SL1_5_HIT = "SL1_5_HIT"          # Hit SL1.5
-    SL1_HIT = "SL1_HIT"              # Hit SL1
+    SL_HIT = "SL_HIT"                # Stop-loss hit
     OPEN = "OPEN"                     # Still open (no TP/SL hit)
     EXPIRED_NO_HIT = "EXPIRED_NO_HIT"  # Expired without hitting anything
 
@@ -47,9 +45,7 @@ class PerformanceMetrics:
     tp3_count: int = 0
     tp2_count: int = 0
     tp1_count: int = 0
-    sl1_count: int = 0
-    sl1_5_count: int = 0
-    sl2_count: int = 0
+    sl_count: int = 0
     open_count: int = 0
     expired_count: int = 0
     
@@ -143,12 +139,8 @@ class SignalAnalyzer:
     def _determine_outcome(self, signal: Dict) -> SignalOutcome:
         """Determines signal outcome based on TP/SL hits."""
         # Check SL hits first (most critical)
-        if signal.get('sl2_hit'):
-            return SignalOutcome.SL2_HIT
-        if signal.get('sl1_5_hit'):
-            return SignalOutcome.SL1_5_HIT
-        if signal.get('sl1_hit'):
-            return SignalOutcome.SL1_HIT
+        if signal.get('sl_hit'):
+            return SignalOutcome.SL_HIT
         
         # Check TP hits (in order of priority)
         if signal.get('tp3_hit'):
@@ -178,17 +170,17 @@ class SignalAnalyzer:
         """
         try:
             entry = signal.get('signal_price')
-            sl2 = signal.get('sl2_price')
+            sl_price = signal.get('sl_price')
             
-            if not entry or not sl2:
+            if not entry or not sl_price:
                 return None
             
             # Calculate risk (always positive)
             direction = signal.get('direction', '').upper()
             if direction == 'LONG':
-                risk = entry - sl2
+                risk = entry - sl_price
             else:  # SHORT
-                risk = sl2 - entry
+                risk = sl_price - entry
             
             if risk <= 0:
                 return None
@@ -223,12 +215,8 @@ class SignalAnalyzer:
             return signal.get('tp2_price')
         elif outcome == SignalOutcome.TP1_ONLY:
             return signal.get('tp1_price')
-        elif outcome == SignalOutcome.SL1_HIT:
-            return signal.get('sl1_price')
-        elif outcome == SignalOutcome.SL1_5_HIT:
-            return signal.get('sl1_5_price')
-        elif outcome == SignalOutcome.SL2_HIT:
-            return signal.get('sl2_price')
+        elif outcome == SignalOutcome.SL_HIT:
+            return signal.get('sl_price')
         
         return signal.get('final_price')  # For closed signals
     
@@ -248,12 +236,8 @@ class SignalAnalyzer:
             exit_time = signal.get('tp2_hit_at') or signal.get('tp3_hit_at')
         elif outcome == SignalOutcome.TP1_ONLY:
             exit_time = signal.get('tp1_hit_at')
-        elif outcome == SignalOutcome.SL2_HIT:
-            exit_time = signal.get('sl2_hit_at')
-        elif outcome == SignalOutcome.SL1_5_HIT:
-            exit_time = signal.get('sl1_5_hit_at')
-        elif outcome == SignalOutcome.SL1_HIT:
-            exit_time = signal.get('sl1_hit_at')
+        elif outcome == SignalOutcome.SL_HIT:
+            exit_time = signal.get('sl_hit_at')
         
         if not exit_time:
             return None
@@ -299,16 +283,14 @@ class SignalAnalyzer:
         tp3_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.TP3_REACHED)
         tp2_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.TP2_REACHED)
         tp1_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.TP1_ONLY)
-        sl1_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.SL1_HIT)
-        sl1_5_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.SL1_5_HIT)
-        sl2_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.SL2_HIT)
+        sl_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.SL_HIT)
         open_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.OPEN)
         expired_count = sum(1 for s in self.signal_stats if s.outcome == SignalOutcome.EXPIRED_NO_HIT)
         
         # Closed signals (exclude OPEN)
         closed_count = total - open_count
         wins = tp1_count + tp2_count + tp3_count
-        losses = sl1_count + sl1_5_count + sl2_count
+        losses = sl_count
         
         # Win rates
         win_rate = (wins / closed_count * 100) if closed_count > 0 else 0.0
@@ -336,7 +318,7 @@ class SignalAnalyzer:
         avg_tp_time = sum(tp_times) / len(tp_times) if tp_times else 0.0
         
         sl_times = [s.hold_time_hours for s in self.signal_stats 
-                    if s.hold_time_hours and s.outcome in [SignalOutcome.SL1_HIT, SignalOutcome.SL1_5_HIT, SignalOutcome.SL2_HIT]]
+                    if s.hold_time_hours and s.outcome == SignalOutcome.SL_HIT]
         avg_sl_time = sum(sl_times) / len(sl_times) if sl_times else 0.0
         
         # MFE/MAE
@@ -350,9 +332,7 @@ class SignalAnalyzer:
             tp3_count=tp3_count,
             tp2_count=tp2_count,
             tp1_count=tp1_count,
-            sl1_count=sl1_count,
-            sl1_5_count=sl1_5_count,
-            sl2_count=sl2_count,
+            sl_count=sl_count,
             open_count=open_count,
             expired_count=expired_count,
             win_rate=round(win_rate, 2),
@@ -380,6 +360,7 @@ class SignalAnalyzer:
         Returns high-confidence signals that hit SL.
         Critical for identifying false positives.
         """
-        return [s for s in self.signal_stats 
-                if s.confidence >= min_confidence 
-                and s.outcome in [SignalOutcome.SL1_HIT, SignalOutcome.SL1_5_HIT, SignalOutcome.SL2_HIT]]
+        return [
+            s for s in self.signal_stats
+            if s.confidence >= min_confidence and s.outcome == SignalOutcome.SL_HIT
+        ]

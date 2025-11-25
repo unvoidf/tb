@@ -97,9 +97,7 @@ class ConfidenceAnalyzer:
                                       SignalOutcome.TP3_REACHED])
             
             losses = sum(1 for s in band_signals 
-                        if s.outcome in [SignalOutcome.SL1_HIT, 
-                                        SignalOutcome.SL1_5_HIT, 
-                                        SignalOutcome.SL2_HIT])
+                        if s.outcome == SignalOutcome.SL_HIT)
             
             closed = len([s for s in band_signals 
                          if s.outcome != SignalOutcome.OPEN])
@@ -121,9 +119,7 @@ class ConfidenceAnalyzer:
             
             # False positives (high confidence but SL)
             false_positives = sum(1 for s in band_signals 
-                                 if s.outcome in [SignalOutcome.SL1_HIT, 
-                                                 SignalOutcome.SL1_5_HIT, 
-                                                 SignalOutcome.SL2_HIT])
+                                 if s.outcome == SignalOutcome.SL_HIT)
             
             results.append(ConfidenceBand(
                 min_confidence=min_conf,
@@ -149,9 +145,7 @@ class ConfidenceAnalyzer:
         # Get false positives
         false_positives = [s for s in self.signal_stats 
                           if s.confidence >= min_confidence 
-                          and s.outcome in [SignalOutcome.SL1_HIT, 
-                                           SignalOutcome.SL1_5_HIT, 
-                                           SignalOutcome.SL2_HIT]]
+                          and s.outcome == SignalOutcome.SL_HIT]
         
         if not false_positives:
             return []
@@ -197,7 +191,7 @@ class ConfidenceAnalyzer:
         # Calculate SL hit rate for these symbols
         symbol_signals = [s for s in self.signal_stats if s.symbol in problem_symbols]
         symbol_sl_hits = sum(1 for s in symbol_signals 
-                            if s.outcome in [SignalOutcome.SL1_HIT, SignalOutcome.SL1_5_HIT, SignalOutcome.SL2_HIT])
+                            if s.outcome == SignalOutcome.SL_HIT)
         sl_rate = (symbol_sl_hits / len(symbol_signals) * 100) if symbol_signals else 100.0
         
         return FalsePositivePattern(
@@ -232,7 +226,7 @@ class ConfidenceAnalyzer:
         if long_pct > 70:
             long_signals = [s for s in self.signal_stats if s.direction == 'LONG']
             long_sl = sum(1 for s in long_signals 
-                         if s.outcome in [SignalOutcome.SL1_HIT, SignalOutcome.SL1_5_HIT, SignalOutcome.SL2_HIT])
+                         if s.outcome == SignalOutcome.SL_HIT)
             sl_rate = (long_sl / len(long_signals) * 100) if long_signals else 100.0
             
             return FalsePositivePattern(
@@ -247,7 +241,7 @@ class ConfidenceAnalyzer:
         elif short_pct > 70:
             short_signals = [s for s in self.signal_stats if s.direction == 'SHORT']
             short_sl = sum(1 for s in short_signals 
-                          if s.outcome in [SignalOutcome.SL1_HIT, SignalOutcome.SL1_5_HIT, SignalOutcome.SL2_HIT])
+                          if s.outcome == SignalOutcome.SL_HIT)
             sl_rate = (short_sl / len(short_signals) * 100) if short_signals else 100.0
             
             return FalsePositivePattern(

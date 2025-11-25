@@ -39,7 +39,7 @@ class SignalFormatter(BaseFormatter):
             signal_price: Signal price
             now_price: Current price
             tp_hits: TP hit statuses {1: True/False, 2: True/False, 3: True/False}
-            sl_hits: SL hit statuses {'1': True/False, '1.5': True/False, '2': True/False}
+            sl_hits: SL hit statuses {'sl': True/False}
             created_at: Signal creation time
             current_price_timestamp: Measurement time of current price
             tp_hit_times: TP hit times
@@ -314,10 +314,10 @@ class SignalFormatter(BaseFormatter):
                     except Exception:
                         sl_pct = 0.0
                     
-                    # Check hit status (In Ranging single SL, can come as '2' or 'stop')
+                    # Check hit status for single SL
                     is_hit = False
                     if sl_hits:
-                        is_hit = sl_hits.get('2') or sl_hits.get('stop')
+                        is_hit = bool(sl_hits.get('sl') or sl_hits.get('stop'))
                         
                     hit_emoji = "❌" if is_hit else "⏳"
                     label = stop_info.get('label', 'Stop-Loss')
@@ -355,17 +355,10 @@ class SignalFormatter(BaseFormatter):
                     except Exception:
                         sl_pct = 0.0
                     
-                    # Check hit status (sl_hits key comes as '2')
+                    # Check hit status for single SL
                     is_hit = False
                     if sl_hits:
-                        # Can come as '2' or 2.0
-                        for k, v in sl_hits.items():
-                            try:
-                                if abs(float(k) - 2.0) < 1e-6:
-                                    if v: is_hit = True
-                            except:
-                                if str(k) == '2':
-                                    if v: is_hit = True
+                        is_hit = bool(sl_hits.get('sl') or sl_hits.get('stop'))
                     
                     hit_emoji = "❌" if is_hit else "⏳"
                     risk_pct = abs(sl_pct)
@@ -390,13 +383,11 @@ class SignalFormatter(BaseFormatter):
                         continue
 
             if sl_hit_times:
-                # Now only SL2 is used (SL1 and SL1.5 removed)
-                # Show "STOP" in Ranging strategy, "SL" in Trend Following
+                # Single SL model: show "STOP" for ranging, "SL" for trend
                 if is_ranging_strategy:
-                    sl_labels = {'1': 'STOP', '1.5': 'STOP', '2': 'STOP', 'stop': 'STOP'}
+                    sl_labels = {'sl': 'STOP', 'stop': 'STOP'}
                 else:
-                    # Trend Following: Only SL2 is used, show as "SL"
-                    sl_labels = {'1': 'SL', '1.5': 'SL', '2': 'SL'}
+                    sl_labels = {'sl': 'SL'}
                 
                 for key, ts in sl_hit_times.items():
                     if not ts:

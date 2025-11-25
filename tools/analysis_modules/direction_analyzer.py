@@ -65,7 +65,7 @@ class DirectionAnalyzer:
         wins = sum(1 for s in closed 
                   if s.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED, SignalOutcome.TP3_REACHED])
         losses = sum(1 for s in closed 
-                    if s.outcome in [SignalOutcome.SL1_HIT, SignalOutcome.SL1_5_HIT, SignalOutcome.SL2_HIT])
+                    if s.outcome == SignalOutcome.SL_HIT)
         
         win_rate = (wins / closed_count * 100) if closed_count > 0 else 0.0
         sl_rate = (losses / closed_count * 100) if closed_count > 0 else 0.0

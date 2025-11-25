@@ -20,47 +20,43 @@ class RiskRewardCalculator:
         tp1: Optional[float],
         tp2: Optional[float],
         tp3: Optional[float],
-        sl1: Optional[float],
-        sl2: Optional[float]
+        sl_price: Optional[float]
     ) -> Dict[str, Optional[float]]:
         """
         Calculates TP/SL levels in terms of R.
-        R = |signal_price - sl2_price|
+        R = |signal_price - sl_price|
         
         Args:
             signal_price: Signal price
             direction: LONG/SHORT
             tp1, tp2, tp3: TP levels
-            sl1, sl2: SL levels
+            sl_price: Stop-loss level
             
         Returns:
             {
                 'tp1_distance_r': float,
                 'tp2_distance_r': float,
                 'tp3_distance_r': float,
-                'sl1_distance_r': float,
-                'sl2_distance_r': float (always -1.0)
+                'sl_distance_r': float
             }
         """
-        if sl2 is None:
-            self.logger.debug("SL2 None, cannot calculate R distance")
+        if sl_price is None:
+            self.logger.debug("Stop-loss None, cannot calculate R distance")
             return {
                 'tp1_distance_r': None,
                 'tp2_distance_r': None,
                 'tp3_distance_r': None,
-                'sl1_distance_r': None,
-                'sl2_distance_r': None
+                'sl_distance_r': None
             }
         
-        r = abs(signal_price - sl2)
+        r = abs(signal_price - sl_price)
         if r == 0:
             self.logger.warning("R = 0, cannot calculate distance")
             return {
                 'tp1_distance_r': None,
                 'tp2_distance_r': None,
                 'tp3_distance_r': None,
-                'sl1_distance_r': None,
-                'sl2_distance_r': None
+                'sl_distance_r': None
             }
         
         def calc_r(price, is_tp):
@@ -82,22 +78,21 @@ class RiskRewardCalculator:
             'tp1_distance_r': calc_r(tp1, True),
             'tp2_distance_r': calc_r(tp2, True),
             'tp3_distance_r': calc_r(tp3, True),
-            'sl1_distance_r': calc_r(sl1, False),
-            'sl2_distance_r': -1.0  # SL2 always -1R (by definition)
+            'sl_distance_r': calc_r(sl_price, False)
         }
 
         def _format_r(value: Optional[float]) -> str:
             return f"{value:.2f}R" if value is not None else "None"
 
         self.logger.debug(
-            "R distances: signal=%s, direction=%s, R=%.6f, TP1=%s, TP2=%s, TP3=%s, SL1=%s",
+            "R distances: signal=%s, direction=%s, R=%.6f, TP1=%s, TP2=%s, TP3=%s, SL=%s",
             signal_price,
             direction,
             r,
             _format_r(result['tp1_distance_r']),
             _format_r(result['tp2_distance_r']),
             _format_r(result['tp3_distance_r']),
-            _format_r(result['sl1_distance_r'])
+            _format_r(result['sl_distance_r'])
         )
         
         return result

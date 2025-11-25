@@ -614,8 +614,8 @@ class SignalScannerManager:
                             timeframe='1h'
                         )
                     
-                    # SL fiyatını al (sl2_price öncelikli, yoksa sl1_price)
-                    sl_price = tp_sl_levels.get('sl2_price') or tp_sl_levels.get('sl1_price')
+                    # SL fiyatını al (tek stop-loss)
+                    sl_price = tp_sl_levels.get('sl_price')
                     
                     if sl_price and sl_price > 0:
                         # Varsayılan balance (gerçek piyasada config'den okunabilir)
@@ -844,7 +844,7 @@ class SignalScannerManager:
                 tp_levels[f'tp{idx}_price'] = tp_price
         
         # SL seviyeleri (Tek SL: 2x ATR)
-        # Dengeli yaklaşım: Sadece SL2 (2x ATR) kullanılır
+        # Dengeli yaklaşım: Tek stop-loss
         sl_multiplier = SL_MULTIPLIER
         if atr:
             offset = atr * sl_multiplier
@@ -864,7 +864,7 @@ class SignalScannerManager:
                 sl_price = None
         
         if sl_price:
-            sl_levels['sl2_price'] = sl_price
+            sl_levels['sl_price'] = sl_price
         
         return {**tp_levels, **sl_levels}
 
@@ -881,8 +881,10 @@ class SignalScannerManager:
                 tp_levels[k] = v
                 
         if 'sl' in custom_targets:
-            for k, v in custom_targets['sl'].items():
-                sl_levels[k] = v
+            stop_loss = custom_targets['sl'].get('stop_loss')
+            if stop_loss is None:
+                stop_loss = custom_targets['sl'].get('price')
+            sl_levels['sl_price'] = stop_loss
                 
         return {**tp_levels, **sl_levels}
 
@@ -917,30 +919,6 @@ class SignalScannerManager:
         )
         
         return signal
-        """Custom hedeflerden TP/SL seviyeleri oluşturur."""
-        def _price_for(key: str) -> Optional[float]:
-            info = custom_targets.get(key, {})
-            price = info.get('price')
-            try:
-                return float(price) if price is not None else None
-            except (TypeError, ValueError):
-                return None
-        
-        tp1_price = _price_for('tp1')
-        tp2_price = _price_for('tp2')
-        tp3_price = _price_for('tp3')
-        stop_price = _price_for('stop_loss')
-        
-        # Ranging stratejisinde sadece 2 TP ve 1 SL var
-        # SL'yi sadece sl2_price olarak set et (diğerleri None)
-        return {
-            'tp1_price': tp1_price,
-            'tp2_price': tp2_price,
-            'tp3_price': tp3_price,
-            'sl1_price': None,
-            'sl1_5_price': None,
-            'sl2_price': stop_price  # Ranging'de tek SL, sl2 olarak kaydediliyor
-        }
     
     def _save_signal_to_db(
         self,
@@ -1018,8 +996,7 @@ class SignalScannerManager:
                     tp1=tp_sl_levels.get('tp1_price'),
                     tp2=tp_sl_levels.get('tp2_price'),
                     tp3=tp_sl_levels.get('tp3_price'),
-                    sl1=tp_sl_levels.get('sl1_price'),
-                    sl2=tp_sl_levels.get('sl2_price')
+                    sl_price=tp_sl_levels.get('sl_price')
                 )
             
             # Alternative entry prices
@@ -1049,9 +1026,7 @@ class SignalScannerManager:
                 tp1_price=tp_sl_levels.get('tp1_price'),
                 tp2_price=tp_sl_levels.get('tp2_price'),
                 tp3_price=tp_sl_levels.get('tp3_price'),
-                sl1_price=tp_sl_levels.get('sl1_price'),
-                sl1_5_price=tp_sl_levels.get('sl1_5_price'),
-                sl2_price=tp_sl_levels.get('sl2_price'),
+                sl_price=tp_sl_levels.get('sl_price'),
                 signal_data=signal_data,
                 entry_levels=entry_levels,
                 signal_score_breakdown=json.dumps(score_breakdown) if score_breakdown else None,
@@ -1059,8 +1034,7 @@ class SignalScannerManager:
                 tp1_distance_r=r_distances.get('tp1_distance_r'),
                 tp2_distance_r=r_distances.get('tp2_distance_r'),
                 tp3_distance_r=r_distances.get('tp3_distance_r'),
-                sl1_distance_r=r_distances.get('sl1_distance_r'),
-                sl2_distance_r=r_distances.get('sl2_distance_r'),
+                sl_distance_r=r_distances.get('sl_distance_r'),
                 optimal_entry_price=optimal_entry,
                 conservative_entry_price=conservative_entry
             )

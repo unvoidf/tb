@@ -85,23 +85,12 @@ def dump_database(db_path: str = "data/signals.db", output_path: str = "signals_
                     f.write(f"    Hit At: {format_timestamp(signal['tp3_hit_at'])}\n")
                 
                 f.write(f"\nStop Loss Seviyeleri:\n")
-                sl1_str = f"${signal['sl1_price']:.4f}" if signal['sl1_price'] else 'N/A'
-                f.write(f"  SL1: {sl1_str}\n")
-                f.write(f"    Hit: {'Evet' if signal['sl1_hit'] else 'Hayır'}\n")
-                if signal['sl1_hit_at']:
-                    f.write(f"    Hit At: {format_timestamp(signal['sl1_hit_at'])}\n")
-                
-                sl1_5_str = f"${signal['sl1_5_price']:.4f}" if signal['sl1_5_price'] else 'N/A'
-                f.write(f"  SL1.5: {sl1_5_str}\n")
-                f.write(f"    Hit: {'Evet' if signal['sl1_5_hit'] else 'Hayır'}\n")
-                if signal['sl1_5_hit_at']:
-                    f.write(f"    Hit At: {format_timestamp(signal['sl1_5_hit_at'])}\n")
-                
-                sl2_str = f"${signal['sl2_price']:.4f}" if signal['sl2_price'] else 'N/A'
-                f.write(f"  SL2: {sl2_str}\n")
-                f.write(f"    Hit: {'Evet' if signal['sl2_hit'] else 'Hayır'}\n")
-                if signal['sl2_hit_at']:
-                    f.write(f"    Hit At: {format_timestamp(signal['sl2_hit_at'])}\n")
+                sl_price = signal.get('sl_price')
+                sl_str = f"${sl_price:.4f}" if sl_price else 'N/A'
+                f.write(f"  SL: {sl_str}\n")
+                f.write(f"    Hit: {'Evet' if signal.get('sl_hit') else 'Hayır'}\n")
+                if signal.get('sl_hit_at'):
+                    f.write(f"    Hit At: {format_timestamp(signal['sl_hit_at'])}\n")
                 
                 # R-based distances
                 if 'tp1_distance_r' in signal.keys() and signal['tp1_distance_r']:
@@ -111,10 +100,8 @@ def dump_database(db_path: str = "data/signals.db", output_path: str = "signals_
                         f.write(f"  TP2 Distance: {signal['tp2_distance_r']:.2f}R\n")
                     if 'tp3_distance_r' in signal.keys() and signal['tp3_distance_r']:
                         f.write(f"  TP3 Distance: {signal['tp3_distance_r']:.2f}R\n")
-                    if 'sl1_distance_r' in signal.keys() and signal['sl1_distance_r']:
-                        f.write(f"  SL1 Distance: {signal['sl1_distance_r']:.2f}R\n")
-                    if 'sl2_distance_r' in signal.keys() and signal['sl2_distance_r']:
-                        f.write(f"  SL2 Distance: {signal['sl2_distance_r']:.2f}R\n")
+                    if 'sl_distance_r' in signal.keys() and signal['sl_distance_r']:
+                        f.write(f"  SL Distance: {signal['sl_distance_r']:.2f}R\n")
                 
                 # Alternative entry prices
                 if 'optimal_entry_price' in signal.keys() and signal['optimal_entry_price']:
@@ -289,11 +276,8 @@ def dump_database(db_path: str = "data/signals.db", output_path: str = "signals_
                 tp3_rate = f"{summary['tp3_hit_rate']*100:.2f}%" if summary['tp3_hit_rate'] else 'N/A'
                 f.write(f"  TP3 Hit Rate: {tp3_rate}\n")
                 
-                sl1_rate = f"{summary['sl1_hit_rate']*100:.2f}%" if summary['sl1_hit_rate'] else 'N/A'
-                f.write(f"  SL1 Hit Rate: {sl1_rate}\n")
-                
-                sl2_rate = f"{summary['sl2_hit_rate']*100:.2f}%" if summary['sl2_hit_rate'] else 'N/A'
-                f.write(f"  SL2 Hit Rate: {sl2_rate}\n")
+                sl_rate = f"{summary['sl_hit_rate']*100:.2f}%" if summary.get('sl_hit_rate') else 'N/A'
+                f.write(f"  SL Hit Rate: {sl_rate}\n")
                 
                 avg_mfe = f"{summary['avg_mfe_percent']*100:.2f}%" if summary['avg_mfe_percent'] else 'N/A'
                 f.write(f"  Avg MFE: {avg_mfe}\n")

@@ -139,7 +139,7 @@ class EntryAnalyzer:
             # If MAE is < -2% (went significantly against us)
             if mae_pct < -2.0:
                 # Check if it eventually hit SL
-                sl_hit = (sig.get('sl1_hit') or sig.get('sl1_5_hit') or sig.get('sl2_hit'))
+                sl_hit = sig.get('sl_hit')
                 if sl_hit:
                     sl_hits_with_large_mae.append(sig)
         
@@ -179,7 +179,7 @@ class EntryAnalyzer:
             return None
         
         sl_hits = sum(1 for s in high_conf_low_atr 
-                     if s.get('sl1_hit') or s.get('sl1_5_hit') or s.get('sl2_hit'))
+                     if s.get('sl_hit'))
         
         sl_rate = (sl_hits / len(high_conf_low_atr)) * 100
         
@@ -211,7 +211,7 @@ class EntryAnalyzer:
         rapid_sl_signals = []
         for sig in high_conf_signals:
             # Check if SL was hit
-            sl_hit_time = sig.get('sl2_hit_at') or sig.get('sl1_5_hit_at') or sig.get('sl1_hit_at')
+            sl_hit_time = sig.get('sl_hit_at')
             
             if sl_hit_time and sig.get('created_at'):
                 time_to_sl_hours = (sl_hit_time - sig['created_at']) / 3600
@@ -253,7 +253,7 @@ class EntryAnalyzer:
                 
                 if isinstance(log_data, list) and len(log_data) >= 2:  # At least 2 logged events
                     # Check if this signal hit SL
-                    if sig.get('sl1_hit') or sig.get('sl1_5_hit') or sig.get('sl2_hit'):
+                    if sig.get('sl_hit'):
                         repeated_signals_sl.append(sig)
             except:
                 continue
@@ -299,7 +299,7 @@ class EntryAnalyzer:
         high_conf_sl = [
             s for s in self.signal_stats
             if s.confidence >= 0.85
-            and s.outcome in [SignalOutcome.SL1_HIT, SignalOutcome.SL1_5_HIT, SignalOutcome.SL2_HIT]
+                and s.outcome == SignalOutcome.SL_HIT
         ]
         
         if high_conf_sl:

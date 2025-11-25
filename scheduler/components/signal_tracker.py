@@ -122,25 +122,15 @@ class SignalTracker:
                 "N/A" if remaining_pct is None else f"{remaining_pct:.2f}%"
             )
 
-        sl_definitions = [
-            ('sl1_price', 'sl1_hit', 'SL1'),
-            ('sl1_5_price', 'sl1_5_hit', 'SL1.5'),
-            ('sl2_price', 'sl2_hit', 'SL2')
-        ]
-
-        for price_key, hit_key, label in sl_definitions:
-            sl_price = signal.get(price_key)
-            if sl_price is None:
-                continue
-
-            sl_hit = signal.get(hit_key, 0) == 1
+        sl_price = signal.get('sl_price')
+        if sl_price is not None:
+            sl_hit = signal.get('sl_hit', 0) == 1
             price_diff = self._calculate_price_difference(sl_price, current_price, direction, is_tp=False)
             remaining_pct = self._calculate_percentage_to_target(sl_price, current_price, direction, is_tp=False)
 
             self.logger.debug(
-                "%s %s: hedef=%.6f durum=%s fiyat_farkı=%s kalan_yüzde=%s",
+                "%s SL: hedef=%.6f durum=%s fiyat_farkı=%s kalan_yüzde=%s",
                 signal_id,
-                label,
                 sl_price,
                 "HIT" if sl_hit else "BEKLEMEDE",
                 "N/A" if price_diff is None else f"{price_diff:.6f}",
@@ -358,59 +348,45 @@ class SignalTracker:
             direction: LONG/SHORT
             
         Returns:
-            SL hit durumları {'2': True/False}
+            SL hit durumu {'sl': True/False}
         """
-        sl_hits = {}
+        sl_hits = {'sl': False}
+        sl_price = signal.get('sl_price')
+        sl_already_hit = signal.get('sl_hit', 0) == 1
         
-        # Dengeli yaklaşım: Sadece SL2 kontrol edilir (SL1 ve SL1.5 kaldırıldı)
-        sl_levels = [
-            ('sl2_price', 'sl2_hit', '2')
-        ]
-        
-        for sl_price_key, sl_hit_key, sl_level_str in sl_levels:
-            sl_price = signal.get(sl_price_key)
-            sl_already_hit = signal.get(sl_hit_key, 0) == 1
-            
-            if not sl_price:
-                sl_hits[sl_level_str] = False
-                continue
+        if not sl_price:
+            return sl_hits
 
-            price_diff = self._calculate_price_difference(sl_price, current_price, direction, is_tp=False)
-            remaining_pct = self._calculate_percentage_to_target(sl_price, current_price, direction, is_tp=False)
-            self.logger.debug(
-                "%s SL%s kontrolü: hedef=%.6f mevcut=%.6f fiyat_farkı=%s kalan_yüzde=%s durum=%s",
-                signal.get('signal_id', 'unknown'),
-                sl_level_str,
-                sl_price,
-                current_price,
-                "N/A" if price_diff is None else f"{price_diff:.6f}",
-                "N/A" if remaining_pct is None else f"{remaining_pct:.2f}%",
-                "HIT" if sl_already_hit else "BEKLEMEDE"
+        price_diff = self._calculate_price_difference(sl_price, current_price, direction, is_tp=False)
+        remaining_pct = self._calculate_percentage_to_target(sl_price, current_price, direction, is_tp=False)
+        self.logger.debug(
+            "%s SL kontrolü: hedef=%.6f mevcut=%.6f fiyat_farkı=%s kalan_yüzde=%s durum=%s",
+            signal.get('signal_id', 'unknown'),
+            sl_price,
+            current_price,
+            "N/A" if price_diff is None else f"{price_diff:.6f}",
+            "N/A" if remaining_pct is None else f"{remaining_pct:.2f}%",
+            "HIT" if sl_already_hit else "BEKLEMEDE"
+        )
+
+        if sl_already_hit:
+            return sl_hits
+        
+        # Touch kontrolü
+        if direction == 'LONG':
+            hit = current_price <= sl_price
+        elif direction == 'SHORT':
+            hit = current_price >= sl_price
+        else:
+            hit = False
+        
+        sl_hits['sl'] = hit
+        
+        if hit:
+            self.repository.update_sl_hit(signal_id=signal['signal_id'])
+            self.logger.info(
+                f"SL hit: {signal['symbol']} @ {current_price}"
             )
-
-            if sl_already_hit:
-                sl_hits[sl_level_str] = False
-                continue
-            
-            # Touch kontrolü
-            if direction == 'LONG':
-                hit = current_price <= sl_price
-            elif direction == 'SHORT':
-                hit = current_price >= sl_price
-            else:
-                hit = False
-            
-            sl_hits[sl_level_str] = hit
-            
-            # Eğer hit olduysa, veritabanını güncelle
-            if hit:
-                self.repository.update_sl_hit(
-                    signal_id=signal['signal_id'],
-                    sl_level=sl_level_str
-                )
-                self.logger.info(
-                    f"SL{sl_level_str} hit: {signal['symbol']} @ {current_price} <= {sl_price}"
-                )
         
         return sl_hits
     
@@ -470,14 +446,10 @@ class SignalTracker:
             
             # SL hit durumlarını dict'e çevir
             sl_hits_dict = {
-                '1': updated_signal.get('sl1_hit', 0) == 1,
-                '1.5': updated_signal.get('sl1_5_hit', 0) == 1,
-                '2': updated_signal.get('sl2_hit', 0) == 1
+                'sl': updated_signal.get('sl_hit', 0) == 1
             }
             sl_hit_times = {
-                '1': updated_signal.get('sl1_hit_at'),
-                '1.5': updated_signal.get('sl1_5_hit_at'),
-                '2': updated_signal.get('sl2_hit_at')
+                'sl': updated_signal.get('sl_hit_at')
             }
 
             created_at = updated_signal.get('created_at') or signal.get('created_at')
@@ -663,9 +635,7 @@ class SignalTracker:
             return 'tp2_reached'
         if signal.get('tp1_hit'):
             return 'tp1_reached'
-        if signal.get('sl2_hit'):
-            return 'sl2_hit'
-        if signal.get('sl1_hit'):
-            return 'sl1_hit'
+        if signal.get('sl_hit'):
+            return 'sl_hit'
         return 'expired_no_target'
 

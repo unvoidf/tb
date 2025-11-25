@@ -37,7 +37,7 @@ class TimeAnalyzer:
             
             if sig.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED, SignalOutcome.TP3_REACHED]:
                 hourly_stats[hour]['wins'] += 1
-            elif sig.outcome in [SignalOutcome.SL1_HIT, SignalOutcome.SL1_5_HIT, SignalOutcome.SL2_HIT]:
+            elif sig.outcome == SignalOutcome.SL_HIT:
                 hourly_stats[hour]['losses'] += 1
         
         results = {}
@@ -72,7 +72,7 @@ class TimeAnalyzer:
             
             if sig.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED, SignalOutcome.TP3_REACHED]:
                 daily_stats[day]['wins'] += 1
-            elif sig.outcome in [SignalOutcome.SL1_HIT, SignalOutcome.SL1_5_HIT, SignalOutcome.SL2_HIT]:
+            elif sig.outcome == SignalOutcome.SL_HIT:
                 daily_stats[day]['losses'] += 1
         
         results = {}
@@ -90,7 +90,7 @@ class TimeAnalyzer:
         tp_times = [s.hold_time_hours for s in self.signal_stats 
                    if s.hold_time_hours and s.outcome in [SignalOutcome.TP1_ONLY, SignalOutcome.TP2_REACHED, SignalOutcome.TP3_REACHED]]
         sl_times = [s.hold_time_hours for s in self.signal_stats 
-                   if s.hold_time_hours and s.outcome in [SignalOutcome.SL1_HIT, SignalOutcome.SL1_5_HIT, SignalOutcome.SL2_HIT]]
+                   if s.hold_time_hours and s.outcome == SignalOutcome.SL_HIT]
         
         return {
             'avg_tp_time': round(sum(tp_times) / len(tp_times), 2) if tp_times else 0.0,

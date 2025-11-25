@@ -6,7 +6,7 @@ import json
 import sqlite3
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from data.signal_database import SignalDatabase
 from data.repositories.base_repository import BaseRepository
 from utils.logger import LoggerManager
@@ -24,6 +24,8 @@ class SignalRepository(BaseRepository):
         """
         super().__init__()
         self.db = database
+        # Backwards compatibility for tests/scripts referencing .database
+        self.database = database
         self.logger = LoggerManager().get_logger('SignalRepository')
     
     def generate_signal_id(self, symbol: str) -> str:
@@ -46,30 +48,27 @@ class SignalRepository(BaseRepository):
     
     def save_signal(
         self,
-        signal_id: str,
-        symbol: str,
-        direction: str,
-        signal_price: float,
-        confidence: float,
-        atr: Optional[float],
-        timeframe: Optional[str],
-        telegram_message_id: int,
-        telegram_channel_id: str,
-        tp1_price: Optional[float],
-        tp2_price: Optional[float],
-        tp3_price: Optional[float],
-        sl1_price: Optional[float],
-        sl1_5_price: Optional[float],
-        sl2_price: Optional[float],
-        signal_data: Dict,
-        entry_levels: Dict,
+        signal_id: Union[str, Dict],
+        symbol: Optional[str] = None,
+        direction: Optional[str] = None,
+        signal_price: Optional[float] = None,
+        confidence: Optional[float] = None,
+        atr: Optional[float] = None,
+        timeframe: Optional[str] = None,
+        telegram_message_id: Optional[int] = None,
+        telegram_channel_id: Optional[str] = None,
+        tp1_price: Optional[float] = None,
+        tp2_price: Optional[float] = None,
+        tp3_price: Optional[float] = None,
+        sl_price: Optional[float] = None,
+        signal_data: Optional[Dict] = None,
+        entry_levels: Optional[Dict] = None,
         signal_score_breakdown: Optional[str] = None,
         market_context: Optional[str] = None,
         tp1_distance_r: Optional[float] = None,
         tp2_distance_r: Optional[float] = None,
         tp3_distance_r: Optional[float] = None,
-        sl1_distance_r: Optional[float] = None,
-        sl2_distance_r: Optional[float] = None,
+        sl_distance_r: Optional[float] = None,
         optimal_entry_price: Optional[float] = None,
         conservative_entry_price: Optional[float] = None
     ) -> bool:
@@ -87,7 +86,7 @@ class SignalRepository(BaseRepository):
             telegram_message_id: Telegram message ID
             telegram_channel_id: Telegram channel ID
             tp1_price, tp2_price, tp3_price: TP levels
-            sl1_price, sl1_5_price, sl2_price: SL levels
+            sl_price: Stop-loss level
             signal_data: Signal data dict (will be converted to JSON)
             entry_levels: Entry levels dict (will be converted to JSON)
             
@@ -95,6 +94,29 @@ class SignalRepository(BaseRepository):
             True if successful
         """
         try:
+            if isinstance(signal_id, dict):
+                prepared = self._prepare_signal_kwargs_from_dict(signal_id)
+                return self.save_signal(**prepared)
+            
+            required_fields = {
+                'symbol': symbol,
+                'direction': direction,
+                'signal_price': signal_price,
+                'confidence': confidence
+            }
+            missing = [name for name, value in required_fields.items() if value is None]
+            if missing:
+                raise ValueError(f"Missing signal fields: {', '.join(missing)}")
+
+            if telegram_message_id is None:
+                telegram_message_id = 0
+            if telegram_channel_id is None:
+                telegram_channel_id = ''
+            if signal_data is None:
+                signal_data = {}
+            if entry_levels is None:
+                entry_levels = {}
+
             with self.db.get_db_context() as conn:
                 cursor = conn.cursor()
                 
@@ -110,22 +132,22 @@ class SignalRepository(BaseRepository):
                         signal_id, symbol, direction, signal_price, confidence,
                         atr, timeframe, telegram_message_id, telegram_channel_id,
                         created_at, tp1_price, tp2_price, tp3_price,
-                        sl1_price, sl1_5_price, sl2_price,
+                        sl_price,
                         signal_data, entry_levels,
                         signal_score_breakdown, market_context,
                         tp1_distance_r, tp2_distance_r, tp3_distance_r,
-                        sl1_distance_r, sl2_distance_r,
+                        sl_distance_r,
                         optimal_entry_price, conservative_entry_price
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     signal_id, symbol, direction, signal_price, confidence,
                     atr, timeframe, telegram_message_id, telegram_channel_id,
                     created_at, tp1_price, tp2_price, tp3_price,
-                    sl1_price, sl1_5_price, sl2_price,
+                    sl_price,
                     signal_data_json, entry_levels_json,
                     signal_score_breakdown, market_context,
                     tp1_distance_r, tp2_distance_r, tp3_distance_r,
-                    sl1_distance_r, sl2_distance_r,
+                    sl_distance_r,
                     optimal_entry_price, conservative_entry_price
                 ))
                 
@@ -137,6 +159,42 @@ class SignalRepository(BaseRepository):
         except Exception as e:
             self.logger.error(f"Signal save error: {str(e)}", exc_info=True)
             return False
+    
+    def _prepare_signal_kwargs_from_dict(self, data: Dict) -> Dict:
+        """
+        Normalizes legacy dict payloads (used by tests and scripts) into the keyword
+        arguments expected by save_signal.
+        """
+        symbol = data.get('symbol')
+        signal_id = data.get('signal_id') or (symbol and self.generate_signal_id(symbol)) or self.generate_signal_id('UNKNOWN')
+        signal_data = data.get('signal_data', data)
+        entry_levels = data.get('entry_levels', {})
+        
+        return {
+            'signal_id': signal_id,
+            'symbol': symbol,
+            'direction': data.get('direction', 'NEUTRAL'),
+            'signal_price': data.get('signal_price', 0.0),
+            'confidence': data.get('confidence', 0.0),
+            'atr': data.get('atr'),
+            'timeframe': data.get('timeframe'),
+            'telegram_message_id': data.get('telegram_message_id', 0),
+            'telegram_channel_id': data.get('telegram_channel_id', ''),
+            'tp1_price': data.get('tp1_price'),
+            'tp2_price': data.get('tp2_price'),
+            'tp3_price': data.get('tp3_price'),
+            'sl_price': data.get('sl_price'),
+            'signal_data': signal_data,
+            'entry_levels': entry_levels,
+            'signal_score_breakdown': data.get('score_breakdown'),
+            'market_context': data.get('market_context'),
+            'tp1_distance_r': data.get('tp1_distance_r', data.get('tp1_r')),
+            'tp2_distance_r': data.get('tp2_distance_r', data.get('tp2_r')),
+            'tp3_distance_r': data.get('tp3_distance_r', data.get('tp3_r')),
+            'sl_distance_r': data.get('sl_distance_r', data.get('sl_r')),
+            'optimal_entry_price': data.get('optimal_entry_price'),
+            'conservative_entry_price': data.get('conservative_entry_price')
+        }
     
     def get_signal(self, signal_id: str) -> Optional[Dict]:
         """
@@ -159,12 +217,20 @@ class SignalRepository(BaseRepository):
                 row = cursor.fetchone()
                 
                 if row:
-                    return self.row_to_dict(row)
+                    result = self.row_to_dict(row)
+                    if 'is_active' not in result:
+                        final_outcome = result.get('final_outcome')
+                        result['is_active'] = 0 if final_outcome else 1
+                    return result
                 return None
             
         except Exception as e:
             self.logger.error(f"Signal retrieval error: {str(e)}", exc_info=True)
             return None
+    
+    def get_signal_by_id(self, signal_id: str) -> Optional[Dict]:
+        """Alias for legacy test compatibility."""
+        return self.get_signal(signal_id)
     
     def get_active_signals(self) -> List[Dict]:
         """
@@ -373,19 +439,10 @@ class SignalRepository(BaseRepository):
     def update_sl_hit(
         self,
         signal_id: str,
-        sl_level: str,
         hit_at: Optional[int] = None
     ) -> bool:
         """
-        Updates SL hit status.
-        
-        Args:
-            signal_id: Signal ID
-            sl_level: SL level ('1', '1.5', or '2')
-            hit_at: Hit time (Unix timestamp, current time if None)
-            
-        Returns:
-            True if successful
+        Updates stop-loss hit status for the single SL model.
         """
         try:
             if hit_at is None:
@@ -393,38 +450,21 @@ class SignalRepository(BaseRepository):
             
             with self.db.get_db_context() as conn:
                 cursor = conn.cursor()
-                
-                if sl_level == '1':
-                    cursor.execute("""
-                        UPDATE signals
-                        SET sl1_hit = 1, sl1_hit_at = ?
-                        WHERE signal_id = ? AND sl1_hit = 0
-                    """, (hit_at, signal_id))
-                elif sl_level == '1.5':
-                    cursor.execute("""
-                        UPDATE signals
-                        SET sl1_5_hit = 1, sl1_5_hit_at = ?
-                        WHERE signal_id = ? AND sl1_5_hit = 0
-                    """, (hit_at, signal_id))
-                elif sl_level == '2':
-                    cursor.execute("""
-                        UPDATE signals
-                        SET sl2_hit = 1, sl2_hit_at = ?
-                        WHERE signal_id = ? AND sl2_hit = 0
-                    """, (hit_at, signal_id))
-                else:
-                    self.logger.warning(f"Invalid SL level: {sl_level}")
-                    return False
+                cursor.execute("""
+                    UPDATE signals
+                    SET sl_hit = 1, sl_hit_at = ?
+                    WHERE signal_id = ? AND sl_hit = 0
+                """, (hit_at, signal_id))
                 
                 conn.commit()
                 rows_affected = cursor.rowcount
                 
                 if rows_affected > 0:
-                    self.logger.info(f"SL{sl_level} hit updated: {signal_id}")
+                    self.logger.info(f"SL hit updated: {signal_id}")
                     return True
-                else:
-                    self.logger.debug(f"SL{sl_level} already hit or signal not found: {signal_id}")
-                    return False
+                
+                self.logger.debug(f"SL already hit or signal not found: {signal_id}")
+                return False
             
         except Exception as e:
             self.logger.error(f"SL hit update error: {str(e)}", exc_info=True)
@@ -779,7 +819,7 @@ class SignalRepository(BaseRepository):
             signal_id: Signal ID
             final_price: Signal closing price
             final_outcome: 'tp1_reached', 'tp2_reached', 'tp3_reached',
-                          'sl1_hit', 'sl2_hit', 'expired_no_target'
+                          'sl_hit', 'expired_no_target'
             
         Returns:
             True if successful
@@ -841,13 +881,14 @@ class SignalRepository(BaseRepository):
     
     def save_rejected_signal(
         self,
-        symbol: str,
-        direction: str,
-        confidence: float,
-        signal_price: float,
-        rejection_reason: str,
-        score_breakdown: Optional[str],
-        market_context: Optional[str]
+        symbol: Union[str, Dict],
+        direction: Optional[str] = None,
+        confidence: Optional[float] = None,
+        signal_price: Optional[float] = None,
+        rejection_reason: Optional[str] = None,
+        score_breakdown: Optional[str] = None,
+        market_context: Optional[str] = None,
+        signal_id: Optional[str] = None
     ) -> bool:
         """
         Reddedilen sinyal kaydeder.
@@ -865,6 +906,19 @@ class SignalRepository(BaseRepository):
             True ise başarılı
         """
         try:
+            if isinstance(symbol, dict):
+                data = symbol
+                return self.save_rejected_signal(
+                    symbol=data.get('symbol'),
+                    direction=data.get('direction'),
+                    confidence=data.get('confidence'),
+                    signal_price=data.get('signal_price', 0.0),
+                    rejection_reason=data.get('rejection_reason') or data.get('rejected_reason'),
+                    score_breakdown=data.get('score_breakdown'),
+                    market_context=data.get('market_context'),
+                    signal_id=data.get('signal_id')
+                )
+            
             with self.db.get_db_context() as conn:
                 cursor = conn.cursor()
                 
@@ -872,11 +926,21 @@ class SignalRepository(BaseRepository):
                 
                 cursor.execute("""
                     INSERT INTO rejected_signals (
-                        symbol, direction, confidence, signal_price,
-                        created_at, rejection_reason, score_breakdown, market_context
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (symbol, direction, confidence, signal_price,
-                      created_at, rejection_reason, score_breakdown, market_context))
+                        signal_id, symbol, direction, confidence, signal_price,
+                        created_at, rejection_reason, score_breakdown, market_context, rejected_reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    signal_id or f"REJ-{created_at}",
+                    symbol,
+                    direction,
+                    confidence,
+                    signal_price or 0.0,
+                    created_at,
+                    rejection_reason,
+                    score_breakdown,
+                    market_context,
+                    rejection_reason
+                ))
                 
                 conn.commit()
             
@@ -937,14 +1001,15 @@ class SignalRepository(BaseRepository):
             with self.db.get_db_context() as conn:
                 cursor = conn.cursor()
                 
+                metrics_json = json.dumps(metrics)
                 cursor.execute("""
                     INSERT INTO signal_metrics_summary (
                         period_start, period_end,
                         total_signals, long_signals, short_signals, neutral_filtered,
                         avg_confidence, tp1_hit_rate, tp2_hit_rate, tp3_hit_rate,
-                        sl1_hit_rate, sl2_hit_rate,
+                        sl_hit_rate,
                         avg_mfe_percent, avg_mae_percent,
-                        avg_time_to_first_target_hours, market_regime
+                        avg_time_to_first_target_hours, market_regime, metrics_json
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     period_start, period_end,
@@ -956,12 +1021,12 @@ class SignalRepository(BaseRepository):
                     metrics.get('tp1_hit_rate', 0.0),
                     metrics.get('tp2_hit_rate', 0.0),
                     metrics.get('tp3_hit_rate', 0.0),
-                    metrics.get('sl1_hit_rate', 0.0),
-                    metrics.get('sl2_hit_rate', 0.0),
+                    metrics.get('sl_hit_rate', 0.0),
                     metrics.get('avg_mfe_percent', 0.0),
                     metrics.get('avg_mae_percent', 0.0),
                     metrics.get('avg_time_to_first_target_hours', 0.0),
-                    metrics.get('market_regime', 'unknown')
+                    metrics.get('market_regime', 'unknown'),
+                    metrics_json
                 ))
                 
                 conn.commit()

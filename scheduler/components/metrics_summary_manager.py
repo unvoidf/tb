@@ -62,8 +62,7 @@ class MetricsSummaryManager:
         tp1_hit_rate = sum(1 for s in signals if s.get('tp1_hit')) / total if total else 0
         tp2_hit_rate = sum(1 for s in signals if s.get('tp2_hit')) / total if total else 0
         tp3_hit_rate = sum(1 for s in signals if s.get('tp3_hit')) / total if total else 0
-        sl1_hit_rate = sum(1 for s in signals if s.get('sl1_hit')) / total if total else 0
-        sl2_hit_rate = sum(1 for s in signals if s.get('sl2_hit')) / total if total else 0
+        sl_hit_rate = sum(1 for s in signals if s.get('sl_hit')) / total if total else 0
         
         # MFE/MAE ortalama (sadece var olanlar)
         mfe_list = [
@@ -78,13 +77,13 @@ class MetricsSummaryManager:
         avg_mfe = sum(mfe_list) / len(mfe_list) if mfe_list else 0
         avg_mae = sum(mae_list) / len(mae_list) if mae_list else 0
         
-        # İlk target'a kadar süre (TP1 veya SL1 hit olanlar)
+        # İlk target'a kadar süre (TP1 veya SL hit olanlar)
         time_to_first = []
         for s in signals:
             created = s['created_at']
             tp1_at = s.get('tp1_hit_at')
-            sl1_at = s.get('sl1_hit_at')
-            hit_times = [t for t in [tp1_at, sl1_at] if t]
+            sl_at = s.get('sl_hit_at')
+            hit_times = [t for t in [tp1_at, sl_at] if t]
             if hit_times:
                 first_hit = min(hit_times)
                 time_to_first.append((first_hit - created) / 3600.0)  # saat
@@ -104,8 +103,7 @@ class MetricsSummaryManager:
             'tp1_hit_rate': tp1_hit_rate,
             'tp2_hit_rate': tp2_hit_rate,
             'tp3_hit_rate': tp3_hit_rate,
-            'sl1_hit_rate': sl1_hit_rate,
-            'sl2_hit_rate': sl2_hit_rate,
+            'sl_hit_rate': sl_hit_rate,
             'avg_mfe_percent': avg_mfe,
             'avg_mae_percent': avg_mae,
             'avg_time_to_first_target_hours': avg_time_to_first,

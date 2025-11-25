@@ -32,8 +32,7 @@ def test_calculate_metrics_basic(manager):
             'tp1_hit': 1,
             'tp2_hit': 0,
             'tp3_hit': 0,
-            'sl1_hit': 0,
-            'sl2_hit': 0,
+            'sl_hit': 0,
             'mfe_price': 105.0,
             'mae_price': 99.0,
             'created_at': 1000000,
@@ -48,12 +47,11 @@ def test_calculate_metrics_basic(manager):
             'tp1_hit': 0,
             'tp2_hit': 0,
             'tp3_hit': 0,
-            'sl1_hit': 1,
-            'sl2_hit': 0,
+            'sl_hit': 1,
             'mfe_price': 198.0,
             'mae_price': 205.0,
             'created_at': 2000000,
-            'sl1_hit_at': 2001500,
+            'sl_hit_at': 2001500,
             'market_context': json.dumps({'regime': 'bearish'})
         }
     ]
@@ -67,7 +65,7 @@ def test_calculate_metrics_basic(manager):
     assert metrics['short_signals'] == 1
     assert metrics['avg_confidence'] == 0.75
     assert metrics['tp1_hit_rate'] == 0.5
-    assert metrics['sl1_hit_rate'] == 0.5
+    assert metrics['sl_hit_rate'] == 0.5
 
 
 def test_calculate_metrics_empty_list(manager):
@@ -104,8 +102,7 @@ def test_generate_daily_summary_with_signals(manager, mock_repository):
             'tp1_hit': 1,
             'tp2_hit': 0,
             'tp3_hit': 0,
-            'sl1_hit': 0,
-            'sl2_hit': 0,
+            'sl_hit': 0,
             'mfe_price': None,
             'mae_price': None,
             'created_at': 1000000,

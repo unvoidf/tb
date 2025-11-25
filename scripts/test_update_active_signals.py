@@ -120,14 +120,10 @@ def update_active_signals_with_keyboard():
                 }
                 
                 sl_hits_dict = {
-                    '1': signal.get('sl1_hit', 0) == 1,
-                    '1.5': signal.get('sl1_5_hit', 0) == 1,
-                    '2': signal.get('sl2_hit', 0) == 1
+                    'sl': signal.get('sl_hit', 0) == 1
                 }
                 sl_hit_times = {
-                    '1': signal.get('sl1_hit_at'),
-                    '1.5': signal.get('sl1_5_hit_at'),
-                    '2': signal.get('sl2_hit_at')
+                    'sl': signal.get('sl_hit_at')
                 }
                 
                 # Confidence change'i al

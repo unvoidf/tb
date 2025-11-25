@@ -55,9 +55,7 @@ class ReportGenerator:
         
         table.add_row("", "")
         table.add_row("[bold]SL Outcomes[/bold]", "")
-        table.add_row("  SL1 Hit", f"[red]{metrics.sl1_count}[/red]")
-        table.add_row("  SL1.5 Hit", f"[red]{metrics.sl1_5_count}[/red]")
-        table.add_row("  SL2 Hit", f"[red]{metrics.sl2_count}[/red]")
+        table.add_row("  SL Hit", f"[red]{metrics.sl_count}[/red]")
         table.add_row("  Total SL Rate", f"[red]{metrics.sl_hit_rate}%[/red]")
         
         # R-multiples
