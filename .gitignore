@@ -47,6 +47,7 @@ logs/
 *.db
 *.sqlite
 data/signals.db*
+data/archive/
 signal_export.json
 
 # OS

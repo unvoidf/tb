@@ -9,6 +9,7 @@ from data.signal_repository import SignalRepository
 from data.market_data_manager import MarketDataManager
 from bot.telegram_bot_manager import TelegramBotManager
 from bot.message_formatter import MessageFormatter
+from tools.archiver import SignalArchiver
 
 
 class SignalTracker:
@@ -41,6 +42,12 @@ class SignalTracker:
         self.message_update_delay = message_update_delay if message_update_delay > 0 else 0.6
         self.logger = LoggerManager().get_logger('SignalTracker')
         self._last_update_time = 0.0
+        self._last_message_check_time = 0.0
+        self.message_check_interval = 600  # 10 minutes
+        
+        # Initialize Archiver
+        # We use the same DB path from the repository
+        self.archiver = SignalArchiver(db_path=self.repository.db.db_path)
     
     def _calculate_price_difference(
         self,
@@ -158,6 +165,9 @@ class SignalTracker:
                         f"Sinyal kontrolü hatası ({signal.get('signal_id', 'unknown')}): {str(e)}",
                         exc_info=True
                     )
+            
+            # Periyodik mesaj kontrolü (Heartbeat)
+            self.check_messages_existence(active_signals)
                     
         except Exception as e:
             self.logger.error(f"Aktif sinyal kontrolü hatası: {str(e)}", exc_info=True)
@@ -511,6 +521,10 @@ class SignalTracker:
                     f"Telegram mesajı silinmiş, sinyal aktif takipten çıkarılıyor: {signal['signal_id']}"
                 )
                 self.repository.mark_message_deleted(signal['signal_id'])
+                
+                # Trigger Archival Immediately
+                self.logger.info(f"Triggering archival for deleted signal: {signal['signal_id']}")
+                self.archiver.archive_signal(signal['signal_id'])
             else:
                 self.logger.warning(f"Telegram mesajı güncellenemedi: {signal['signal_id']}")
                 
@@ -636,3 +650,53 @@ class SignalTracker:
             return 'sl_hit'
         return 'expired_no_target'
 
+    def check_messages_existence(self, active_signals: list) -> None:
+        """
+        Aktif sinyallerin Telegram mesajlarının hala var olup olmadığını kontrol eder.
+        Eğer mesaj silinmişse, sinyali arşivler.
+        """
+        current_time = time.time()
+        if current_time - self._last_message_check_time < self.message_check_interval:
+            return
+
+        self.logger.info("Heartbeat: Mesaj varlık kontrolü başlatılıyor...")
+        
+        for signal in active_signals:
+            try:
+                signal_id = signal.get('signal_id')
+                channel_id = signal.get('telegram_channel_id')
+                message_id = signal.get('telegram_message_id')
+                
+                if not all([signal_id, channel_id, message_id]):
+                    continue
+                    
+                # Mesajın varlığını kontrol et
+                # Telegram API'de doğrudan "check existence" yok, ama forward veya reply denemesi yapılabilir.
+                # Ancak en temiz yöntem, bot_manager üzerinden mesajı okumaya çalışmaktır.
+                # BotManager'a yeni bir metod eklememiz gerekebilir veya mevcut metodları kullanabiliriz.
+                # Şimdilik edit_channel_message metodunun 'message_not_found' dönüşünü kullanıyoruz.
+                # Ancak edit yapmak istemiyoruz, sadece kontrol.
+                # Bu yüzden TelegramBotManager'a 'check_message_exists' eklemek en doğrusu olurdu.
+                # Fakat şimdilik basit bir "sessiz edit" veya "get_messages" (eğer varsa) kullanılabilir.
+                # Telegram Bot API'de getMessage yok.
+                # Genelde kullanılan yöntem: forwardMessage (dummy chat'e) veya editMessageReplyMarkup (aynı markup ile).
+                
+                # Aynı markup ile edit yapmayı deneyelim.
+                keyboard = self.formatter.create_signal_keyboard(signal_id)
+                success, message_not_found = self.bot_manager.edit_channel_message(
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    message=None, # Mesaj içeriğini değiştirme
+                    reply_markup=keyboard # Aynı klavyeyi gönder
+                )
+                
+                if message_not_found:
+                    self.logger.warning(f"Heartbeat: Mesaj silinmiş, arşivleniyor: {signal_id}")
+                    self.repository.mark_message_deleted(signal_id)
+                    self.archiver.archive_signal(signal_id)
+                    
+            except Exception as e:
+                self.logger.error(f"Heartbeat hatası ({signal_id}): {str(e)}")
+        
+        self._last_message_check_time = current_time
+        self.logger.info("Heartbeat: Kontrol tamamlandı.")
