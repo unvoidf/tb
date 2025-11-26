@@ -201,11 +201,12 @@ class SignalTracker:
             # 3) ALTERNATIVE ENTRY HIT KONTROLÜ
             self._check_alternative_entry_hit(signal, current_price, direction)
             
-            # 4) FINALİZE KONTROLÜ
-            if self._should_finalize_signal(signal):
-                final_outcome = self._determine_final_outcome(signal)
-                self.repository.finalize_signal(signal_id, current_price, final_outcome)
-                self.logger.info(f"Sinyal finalized: {signal_id} - {final_outcome}")
+            # 4) FINALİZE KONTROLÜ (KALDIRILDI)
+            # 72 saat kuralı iptal edildi. Sinyal aktifliği sadece Telegram mesajının varlığına bağlı.
+            # if self._should_finalize_signal(signal):
+            #     final_outcome = self._determine_final_outcome(signal)
+            #     self.repository.finalize_signal(signal_id, current_price, final_outcome)
+            #     self.logger.info(f"Sinyal finalized: {signal_id} - {final_outcome}")
             
             # TP seviyelerini kontrol et
             tp_hits = self._check_tp_levels(signal, current_price, direction)

@@ -36,12 +36,17 @@ def _add_flag_arguments(parser: ArgumentParser) -> None:
     parser.add_argument(
         '--send-telegram',
         action='store_true',
-        help='Send report to Telegram Admin'
+        help='Send results to Telegram'
     )
     parser.add_argument(
         '--summary',
         action='store_true',
-        help='Only output condensed summary report'
+        help='Show only summary, suppress trade details'
+    )
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Show detailed logs even when sending Telegram'
     )
     parser.add_argument(
         '--opt',
@@ -92,6 +97,13 @@ def _add_parameter_arguments(parser: ArgumentParser) -> None:
         default=10,
         help='Number of top results to show in optimization mode (default: 10, ignored if --risk or --leverage is used)'
     )
+    parser.add_argument(
+        '--entry-strategy',
+        type=str,
+        choices=['immediate', 'optimal', 'conservative'],
+        default='immediate',
+        help='Entry strategy to simulate (default: immediate)'
+    )
 
 
 def _parse_arguments() -> Namespace:
@@ -111,7 +123,8 @@ def _create_simulation_engine(
     risk: float,
     leverage: int,
     commission: float,
-    mmr: float
+    mmr: float,
+    entry_strategy: str = 'immediate'
 ) -> SimulationEngine:
     """Create SimulationEngine with given parameters.
 
@@ -121,6 +134,7 @@ def _create_simulation_engine(
         leverage: Leverage multiplier.
         commission: Commission rate per side (%).
         mmr: Maintenance margin rate.
+        entry_strategy: Entry strategy ('immediate', 'optimal', 'conservative').
 
     Returns:
         Configured SimulationEngine instance.
@@ -130,7 +144,8 @@ def _create_simulation_engine(
         risk_per_trade=risk,
         leverage=leverage,
         commission_rate=commission,
-        mmr=mmr
+        mmr=mmr,
+        entry_strategy=entry_strategy
     )
 
 
@@ -186,11 +201,12 @@ def _run_telegram_with_explicit_params(args: Namespace) -> None:
         risk=args.risk,
         leverage=args.leverage,
         commission=args.commission,
-        mmr=args.mmr
+        mmr=args.mmr,
+        entry_strategy=args.entry_strategy
     )
     engine.run(
         send_telegram=True,
-        summary_only=True,
+        summary_only=not args.verbose,
         manual_config={'risk': args.risk, 'leverage': args.leverage}
     )
 
@@ -218,11 +234,12 @@ def _run_telegram_with_optimization(args: Namespace) -> None:
         risk=best_config['risk'],
         leverage=best_config['leverage'],
         commission=args.commission,
-        mmr=args.mmr
+        mmr=args.mmr,
+        entry_strategy=args.entry_strategy
     )
     engine.run(
         send_telegram=True,
-        summary_only=True,
+        summary_only=not args.verbose,
         auto_optimized=best_config
     )
 
@@ -265,7 +282,8 @@ def _run_simulation_mode(args: Namespace) -> None:
         risk=args.risk,
         leverage=args.leverage,
         commission=args.commission,
-        mmr=args.mmr
+        mmr=args.mmr,
+        entry_strategy=args.entry_strategy
     )
     engine.run(
         send_telegram=False,

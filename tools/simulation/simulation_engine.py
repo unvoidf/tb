@@ -4,8 +4,10 @@ Simulation Engine
 Core simulation engine for event-driven backtesting.
 """
 import copy
+import pandas as pd
+import json
 import os
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Tuple, Optional, Any
 from .models import Event
 from .portfolio import Portfolio
 from .position_manager import PositionSlot, get_position_slot
@@ -28,6 +30,7 @@ class SimulationEngine:
         leverage: int,
         commission_rate: float,
         mmr: float = DEFAULT_MAINTENANCE_MARGIN_RATE,
+        entry_strategy: str = 'immediate',
         min_sl_liq_buffer: Optional[float] = None,
         db_path: str = "data/signals.db"
     ):
@@ -36,6 +39,7 @@ class SimulationEngine:
         self.leverage = leverage
         self.commission_rate = commission_rate
         self.mmr = mmr
+        self.entry_strategy = entry_strategy
         self.min_sl_liq_buffer = min_sl_liq_buffer or self._load_min_sl_liq_buffer()
         
         self.db_manager = DatabaseManager(db_path)
@@ -108,20 +112,82 @@ class SimulationEngine:
         silent: bool,
         summary_only: bool
     ) -> None:
-        """Processes an entry event."""
+        """Processes an entry event with Smart Simulation logic."""
         signal = event.signal
         sig_id = signal['signal_id']
         symbol = signal['symbol']
         direction = signal['direction']
         current_time_str = format_timestamp(event.timestamp)
         
-        # Calculate Position Size based on Risk
-        risk_amount = self.portfolio.balance * (self.risk_per_trade / 100)
+        # --- SMART SIMULATION LOGIC START ---
+        
+        # 1. Entry Strategy Check & Price Selection
         entry_price = signal['signal_price']
         
+        if self.entry_strategy == 'conservative':
+            if not signal.get('conservative_entry_hit'):
+                if not silent and not summary_only:
+                    self.report_generator.log(
+                        f"{step:<6} {current_time_str:<20} {'SKIP':<12} {symbol:<15} "
+                        f"{'-':<6} ${self.portfolio.free_balance:>13.2f} {'-':<15} {'-':<10} "
+                        f"{'-':<12} {'-':<12}"
+                    )
+                    self.report_generator.log(f"      Sebep: Conservative entry not hit")
+                return
+            entry_price = signal.get('conservative_entry_price') or entry_price
+            
+        elif self.entry_strategy == 'optimal':
+            if not signal.get('optimal_entry_hit'):
+                if not silent and not summary_only:
+                    self.report_generator.log(
+                        f"{step:<6} {current_time_str:<20} {'SKIP':<12} {symbol:<15} "
+                        f"{'-':<6} ${self.portfolio.free_balance:>13.2f} {'-':<15} {'-':<10} "
+                        f"{'-':<12} {'-':<12}"
+                    )
+                    self.report_generator.log(f"      Sebep: Optimal entry not hit")
+                return
+            entry_price = signal.get('optimal_entry_price') or entry_price
+
+        # 2. TP/SL Recalculation (Hybrid Logic)
         sl_price = signal.get('sl_price')
+        
+        # Check strategy type (Trend vs Ranging)
+        signal_data = signal.get('signal_data')
+        if isinstance(signal_data, str):
+            try:
+                signal_data = json.loads(signal_data)
+            except:
+                signal_data = {}
+        elif not isinstance(signal_data, dict):
+            signal_data = {}
+                
+        strategy_type = signal_data.get('strategy_type', 'trend')
+        
+        # Only recalculate for Trend strategy if entry price changed (not Immediate)
+        if strategy_type == 'trend' and self.entry_strategy != 'immediate':
+            atr = signal.get('atr')
+            
+            if atr:
+                # Dynamic recalculation using ATR
+                if direction == 'LONG':
+                    sl_price = entry_price - (2 * atr)
+                else:
+                    sl_price = entry_price + (2 * atr)
+            else:
+                # Fallback (Fixed %)
+                if direction == 'LONG':
+                    sl_price = entry_price * 0.98
+                else:
+                    sl_price = entry_price * 1.02
+        
+        # Fallback if SL is still missing
         if not sl_price:
             sl_price = entry_price * 0.95 if direction == 'LONG' else entry_price * 1.05
+            
+        # --- SMART SIMULATION LOGIC END ---
+        
+        # Calculate Position Size based on Risk
+        risk_amount = self.portfolio.balance * (self.risk_per_trade / 100)
         
         sl_distance_pct = abs(entry_price - sl_price) / entry_price
         if sl_distance_pct == 0:
