@@ -168,6 +168,29 @@ class SignalRepository(BaseRepository):
         signal_data = data.get('signal_data', data)
         entry_levels = data.get('entry_levels', {})
         
+        # Extract TP/SL from custom_targets if not provided directly (Mean Reversion signals)
+        tp1_price = data.get('tp1_price')
+        tp2_price = data.get('tp2_price')
+        sl_price = data.get('sl_price')
+        
+        # Check signal_data for custom_targets
+        custom_targets = signal_data.get('custom_targets', {})
+        if custom_targets:
+            # Extract TP1 if not provided
+            if tp1_price is None and 'tp1' in custom_targets:
+                tp1_price = custom_targets['tp1'].get('price')
+            
+            # Extract TP2 if not provided
+            if tp2_price is None and 'tp2' in custom_targets:
+                tp2_price = custom_targets['tp2'].get('price')
+            
+            # Extract SL if not provided (check both 'stop_loss' and 'sl' keys)
+            if sl_price is None:
+                sl_section = custom_targets.get('stop_loss') or custom_targets.get('sl')
+                if sl_section:
+                    # Try 'price' key first, then 'stop_loss' key
+                    sl_price = sl_section.get('price') or sl_section.get('stop_loss')
+        
         return {
             'signal_id': signal_id,
             'symbol': symbol,
@@ -178,9 +201,9 @@ class SignalRepository(BaseRepository):
             'timeframe': data.get('timeframe'),
             'telegram_message_id': data.get('telegram_message_id', 0),
             'telegram_channel_id': data.get('telegram_channel_id', ''),
-            'tp1_price': data.get('tp1_price'),
-            'tp2_price': data.get('tp2_price'),
-            'sl_price': data.get('sl_price'),
+            'tp1_price': tp1_price,
+            'tp2_price': tp2_price,
+            'sl_price': sl_price,
             'signal_data': signal_data,
             'entry_levels': entry_levels,
             'signal_score_breakdown': data.get('score_breakdown'),

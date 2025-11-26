@@ -47,6 +47,11 @@ class SignalTracker:
         self._last_message_check_time = 0.0
         self.message_check_interval = 600  # 10 minutes
         
+        # Mesaj güncelleme kontrolü için threshold'lar
+        self.mfe_mae_update_threshold_pct = 2.0  # MFE/MAE %2 değişiminde güncelle
+        self.hit_signal_update_interval = 7200  # Hit olmuş sinyaller için 2 saatte bir güncelle
+        self.confidence_change_threshold = 0.05  # Confidence %5 değişiminde güncelle
+        
         # Initialize Archiver
         # We use the same DB path from the repository
         self.archiver = SignalArchiver(db_path=self.repository.db.db_path)
@@ -208,7 +213,19 @@ class SignalTracker:
             )
             
             # 2) MFE/MAE GÜNCELLE
-            self._update_mfe_mae(signal, current_price, direction)
+            # Önce eski değerleri sakla (threshold kontrolü için)
+            old_mfe_price_before_update = signal.get('mfe_price')
+            old_mae_price_before_update = signal.get('mae_price')
+            
+            mfe_updated, mae_updated = self._update_mfe_mae(signal, current_price, direction)
+            
+            # MFE/MAE güncellendiyse, signal dict'i güncelle (threshold kontrolü için)
+            if mfe_updated:
+                signal['mfe_price'] = current_price
+                signal['mfe_at'] = int(time.time())
+            if mae_updated:
+                signal['mae_price'] = current_price
+                signal['mae_at'] = int(time.time())
             
             # 3) ALTERNATIVE ENTRY HIT KONTROLÜ
             self._check_alternative_entry_hit(signal, current_price, direction)
@@ -226,22 +243,53 @@ class SignalTracker:
             # SL seviyelerini kontrol et
             sl_hits = self._check_sl_levels(signal, current_price, direction)
             
-            # Sadece gerçekten yeni hit olan seviyeler varsa mesajı güncelle
-            # (tp_hits ve sl_hits dict'leri her zaman dolu, sadece True değerleri kontrol et)
+            # HİBRİT MESAJ GÜNCELLEME MANTIĞI
+            # 1. Yeni hit kontrolü (öncelikli)
             has_new_tp_hits = any(tp_hits.values()) if tp_hits else False
             has_new_sl_hits = any(sl_hits.values()) if sl_hits else False
             
-            if has_new_tp_hits or has_new_sl_hits:
+            # 2. MFE/MAE threshold kontrolü
+            # Eski değerleri parametre olarak geç (threshold kontrolü için)
+            mfe_mae_threshold_crossed = self._check_mfe_mae_threshold_crossed(
+                signal, current_price, direction, mfe_updated, mae_updated,
+                old_mfe_price_before_update, old_mae_price_before_update
+            )
+            
+            # 3. Hit olmuş sinyaller için zaman aşımı kontrolü (fall-back)
+            hit_signal_timeout_reached = self._check_hit_signal_timeout(signal)
+            
+            # 4. Confidence değişimi kontrolü (bonus)
+            confidence_changed = self._check_confidence_change(signal)
+            
+            # Mesaj güncelleme koşulu (hibrit)
+            should_update = (
+                has_new_tp_hits or 
+                has_new_sl_hits or 
+                mfe_mae_threshold_crossed or 
+                hit_signal_timeout_reached or 
+                confidence_changed
+            )
+            
+            if should_update:
+                update_reasons = []
+                if has_new_tp_hits or has_new_sl_hits:
+                    update_reasons.append(f"yeni hit (TP: {has_new_tp_hits}, SL: {has_new_sl_hits})")
+                if mfe_mae_threshold_crossed:
+                    update_reasons.append("MFE/MAE threshold")
+                if hit_signal_timeout_reached:
+                    update_reasons.append("hit sinyal timeout")
+                if confidence_changed:
+                    update_reasons.append("confidence değişimi")
+                
                 self.logger.debug(
-                    f"{symbol} yeni hit tespit edildi - "
-                    f"TP hits: {[k for k, v in tp_hits.items() if v]}, "
-                    f"SL hits: {[k for k, v in sl_hits.items() if v]}"
+                    f"{symbol} mesaj güncelleme gerekiyor - "
+                    f"Sebepler: {', '.join(update_reasons)}"
                 )
-                # Yeni hit varsa mesajı güncelle (confidence_change içeride hesaplanacak)
+                # Mesajı güncelle (confidence_change içeride hesaplanacak)
                 self._update_telegram_message(signal, tp_hits, sl_hits)
             else:
-                # Yeni hit yok, mesaj güncelleme yapma (gereksiz güncellemeleri önle)
-                self.logger.debug(f"{symbol} yeni hit yok, mesaj güncellenmedi")
+                # Güncelleme gerektirmiyor
+                self.logger.debug(f"{symbol} güncelleme gerektirmedi")
                 
         except Exception as e:
             self.logger.error(f"Sinyal seviye kontrolü hatası: {str(e)}", exc_info=True)
@@ -479,6 +527,9 @@ class SignalTracker:
                     # 1. Custom Targets kontrolü (Mean Reversion için)
                     # custom_targets signal_data içinde bulunur (SignalRepository.row_to_dict ile parse edilmiş)
                     custom_targets = signal_data.get('custom_targets', {})
+                    # Type safety: Ensure custom_targets is a dict
+                    if not isinstance(custom_targets, dict):
+                        custom_targets = {}
                     if custom_targets:
                         # 'sl' veya 'stop_loss' key kontrolü
                         sl_section = custom_targets.get('sl') or custom_targets.get('stop_loss')
@@ -641,6 +692,158 @@ class SignalTracker:
             )
         
         return mfe_updated, mae_updated
+    
+    def _check_mfe_mae_threshold_crossed(
+        self,
+        signal: Dict,
+        current_price: float,
+        direction: str,
+        mfe_updated: bool,
+        mae_updated: bool,
+        old_mfe_price: Optional[float] = None,
+        old_mae_price: Optional[float] = None
+    ) -> bool:
+        """
+        MFE/MAE'de anlamlı değişim olup olmadığını kontrol eder.
+        Threshold geçildiyse True döner.
+        
+        Args:
+            signal: Sinyal dict
+            current_price: Güncel fiyat
+            direction: Sinyal yönü
+            mfe_updated: MFE güncellendi mi?
+            mae_updated: MAE güncellendi mi?
+            old_mfe_price: Güncellemeden önceki MFE değeri (opsiyonel)
+            old_mae_price: Güncellemeden önceki MAE değeri (opsiyonel)
+            
+        Returns:
+            True if threshold crossed, False otherwise
+        """
+        if not (mfe_updated or mae_updated):
+            return False
+        
+        signal_price = signal.get('signal_price')
+        if not signal_price or signal_price == 0:
+            return False
+        
+        # Eski değerleri parametre olarak al (güncellemeden önce saklanmış)
+        # Eğer parametre verilmemişse, signal dict'ten oku (fallback)
+        if old_mfe_price is None:
+            old_mfe_price = signal.get('mfe_price')
+        if old_mae_price is None:
+            old_mae_price = signal.get('mae_price')
+        
+        # Eğer MFE/MAE ilk kez set ediliyorsa, güncelleme anlamlı değildir
+        # (İlk değer her zaman set edilir, threshold kontrolü ikinci güncellemeden itibaren)
+        if (mfe_updated and old_mfe_price is None) or (mae_updated and old_mae_price is None):
+            return False
+        
+        # Yeni MFE/MAE değerlerini signal dict'ten al (satır 220-224'te güncellenmiş)
+        # Gereksiz tekrar hesaplama yapmıyoruz, zaten güncellenmiş değerleri kullanıyoruz
+        new_mfe_price = signal.get('mfe_price') if mfe_updated else old_mfe_price
+        new_mae_price = signal.get('mae_price') if mae_updated else old_mae_price
+        
+        # Threshold kontrolü: Signal price'a göre % değişim
+        if mfe_updated and old_mfe_price is not None and new_mfe_price is not None:
+            mfe_change_pct = abs((new_mfe_price - old_mfe_price) / signal_price) * 100
+            if mfe_change_pct >= self.mfe_mae_update_threshold_pct:
+                return True
+        
+        if mae_updated and old_mae_price is not None and new_mae_price is not None:
+            mae_change_pct = abs((new_mae_price - old_mae_price) / signal_price) * 100
+            if mae_change_pct >= self.mfe_mae_update_threshold_pct:
+                return True
+        
+        return False
+    
+    def _check_hit_signal_timeout(self, signal: Dict) -> bool:
+        """
+        Hit olmuş sinyaller için zaman aşımı kontrolü yapar.
+        En az 2 saatte bir güncelleme yapılmalı.
+        
+        Args:
+            signal: Sinyal dict
+            
+        Returns:
+            True if timeout reached, False otherwise
+        """
+        # Hit kontrolü
+        sl_hit = signal.get('sl_hit', 0) == 1
+        tp1_hit = signal.get('tp1_hit', 0) == 1
+        tp2_hit = signal.get('tp2_hit', 0) == 1
+        
+        if not (sl_hit or tp1_hit or tp2_hit):
+            return False
+        
+        # Son güncelleme zamanını hit zamanından hesapla
+        # En son hit olan seviyenin zamanını kullan
+        last_update = None
+        
+        # Tüm hit zamanlarını topla ve en sonuncusunu al
+        hit_times = []
+        if sl_hit and signal.get('sl_hit_at'):
+            hit_times.append(signal.get('sl_hit_at'))
+        if tp1_hit and signal.get('tp1_hit_at'):
+            hit_times.append(signal.get('tp1_hit_at'))
+        if tp2_hit and signal.get('tp2_hit_at'):
+            hit_times.append(signal.get('tp2_hit_at'))
+        
+        if hit_times:
+            # En son hit zamanını al
+            last_update = max(hit_times)
+        else:
+            # Hit zamanı yoksa created_at kullan
+            last_update = signal.get('created_at', 0)
+        
+        current_time = int(time.time())
+        time_since_update = current_time - (last_update or 0)
+        
+        # 2 saat (7200 saniye) geçtiyse güncelle
+        return time_since_update >= self.hit_signal_update_interval
+    
+    def _check_confidence_change(self, signal: Dict) -> bool:
+        """
+        Confidence değerinde anlamlı değişim olup olmadığını kontrol eder.
+        
+        Args:
+            signal: Sinyal dict
+            
+        Returns:
+            True if confidence changed significantly, False otherwise
+        """
+        # Signal log'dan son confidence değişimini al
+        signal_log_raw = signal.get('signal_log')
+        if not signal_log_raw:
+            return False
+        
+        # signal_log JSON string olarak saklanıyor, parse et
+        try:
+            import json
+            if isinstance(signal_log_raw, str):
+                signal_log = json.loads(signal_log_raw)
+            elif isinstance(signal_log_raw, list):
+                signal_log = signal_log_raw
+            else:
+                return False
+        except (json.JSONDecodeError, TypeError):
+            return False
+        
+        if not signal_log or not isinstance(signal_log, list):
+            return False
+        
+        # Son log entry'yi bul
+        last_entry = None
+        for entry in reversed(signal_log):
+            if entry.get('event_type') == 'new_signal' and 'confidence_change' in entry:
+                last_entry = entry
+                break
+        
+        if not last_entry:
+            return False
+        
+        # Confidence değişimi threshold'u geçtiyse True
+        confidence_change = abs(last_entry.get('confidence_change', 0))
+        return confidence_change >= self.confidence_change_threshold
     
     def _check_alternative_entry_hit(self, signal: Dict, current_price: float, direction: str):
         """
