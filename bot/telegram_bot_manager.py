@@ -405,6 +405,85 @@ class TelegramBotManager:
             self.logger.error(f"Channel message could not be edited (sync): {str(e)}", exc_info=True)
             return (False, False)
     
+    async def check_message_exists_async(
+        self, channel_id: str, message_id: int, reply_markup=None
+    ) -> tuple[bool, bool]:
+        """
+        Checks if a message exists without modifying its text.
+        
+        Uses editMessageReplyMarkup to update only the inline keyboard,
+        which allows checking message existence without requiring message text.
+        
+        Args:
+            channel_id: Telegram channel ID
+            message_id: Message ID to check
+            reply_markup: Inline keyboard markup (optional, uses current if None)
+            
+        Returns:
+            (exists: bool, message_not_found: bool)
+            - exists: True if message exists
+            - message_not_found: True if message not found (deleted)
+        """
+        try:
+            # Use editMessageReplyMarkup - doesn't require message text
+            await self.application.bot.edit_message_reply_markup(
+                chat_id=channel_id,
+                message_id=message_id,
+                reply_markup=reply_markup
+            )
+            self.logger.debug(f"Message exists check passed - Message ID: {message_id}")
+            return (True, False)
+        except Exception as e:
+            error_message = str(e).lower()
+            # Check "Message to edit not found" error
+            is_message_not_found = (
+                "message to edit not found" in error_message or
+                "message not found" in error_message
+            )
+            
+            # "Message is not modified" is also a success - means message exists
+            if "message is not modified" in error_message:
+                self.logger.debug(f"Message exists (not modified) - Message ID: {message_id}")
+                return (True, False)
+            
+            if is_message_not_found:
+                self.logger.debug(f"Message not found - Message ID: {message_id}")
+                return (False, True)
+            else:
+                self.logger.warning(
+                    f"Message existence check error: {str(e)} - Message ID: {message_id}"
+                )
+                # Unknown error - assume message might exist (don't delete)
+                return (False, False)
+    
+    def check_message_exists(
+        self, channel_id: str, message_id: int, reply_markup=None
+    ) -> tuple[bool, bool]:
+        """
+        Checks if a message exists (sync wrapper).
+        
+        Args:
+            channel_id: Telegram channel ID
+            message_id: Message ID to check
+            reply_markup: Inline keyboard markup (optional)
+            
+        Returns:
+            (exists: bool, message_not_found: bool)
+        """
+        try:
+            if not self.application:
+                self.logger.error("Bot application not initialized yet (check message)")
+                return (False, False)
+            result = self._run_on_bot_loop(
+                self.check_message_exists_async(channel_id, message_id, reply_markup)
+            )
+            if isinstance(result, tuple) and len(result) == 2:
+                return result
+            return (False, False)
+        except Exception as e:
+            self.logger.error(f"Message existence check failed (sync): {str(e)}", exc_info=True)
+            return (False, False)
+    
     def send_message(
         self, chat_id: int, text: str, reply_to_message_id: int = None
     ) -> None:

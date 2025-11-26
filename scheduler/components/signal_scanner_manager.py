@@ -823,10 +823,13 @@ class SignalScannerManager:
                     tp_levels[f'{simple_key}_price'] = price
                     processed_levels += 1
                 
-        if 'sl' in custom_targets:
-            stop_loss = custom_targets['sl'].get('stop_loss')
+        # Check for 'sl' or 'stop_loss' key
+        sl_section = custom_targets.get('sl') or custom_targets.get('stop_loss')
+        
+        if sl_section:
+            stop_loss = sl_section.get('stop_loss')
             if stop_loss is None:
-                stop_loss = custom_targets['sl'].get('price')
+                stop_loss = sl_section.get('price')
             sl_levels['sl_price'] = stop_loss
                 
         return {**tp_levels, **sl_levels}
@@ -1054,6 +1057,7 @@ class SignalScannerManager:
             self._update_signal_cache(
                 symbol=summary.get('symbol'),
                 has_active_signal=True,
+                signal_id=summary.get('signal_id'),
                 direction=summary.get('direction', 'NEUTRAL'),
                 confidence=float(summary.get('confidence', 0.0) or 0.0),
                 timestamp=summary.get('created_at'),

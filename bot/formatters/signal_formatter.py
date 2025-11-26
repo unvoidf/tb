@@ -147,8 +147,8 @@ class SignalFormatter(BaseFormatter):
             
             # Signal date/time info
             signal_created_at = created_at if created_at else int(time.time())
-            signal_datetime = self.format_timestamp(signal_created_at)
-            lines.append(f"🕐 {signal_datetime}")
+            # signal_datetime = self.format_timestamp(signal_created_at)
+            # lines.append(f"🕐 {signal_datetime}")
             if signal_id:
                 lines.append(f"🆔 ID: `{signal_id}`")
             lines.append("")
@@ -191,7 +191,7 @@ class SignalFormatter(BaseFormatter):
             # TP levels (header removed, showing TP1/TP2 directly)
             if is_ranging_strategy:
                 # Get SL price for Ranging (for R/R calculation)
-                stop_info = custom_targets.get('stop_loss', {})
+                stop_info = custom_targets.get('sl') or custom_targets.get('stop_loss', {})
                 sl_price_ranging = stop_info.get('price')
                 
                 for idx, key in enumerate(['tp1', 'tp2'], start=1):
@@ -278,24 +278,7 @@ class SignalFormatter(BaseFormatter):
                         else:
                             tps.append(f"🎯 TP{idx} {fmt_price(tp_price)} ({tp_pct:+.2f}%) {hit_emoji}")
                 lines.extend(tps)
-            lines.append("")
-            
-            # Liquidation Risk Info (if available)
-            liquidation_risk_pct = signal_data.get('liquidation_risk_percentage')
-            if liquidation_risk_pct is not None:
-                # Select emoji based on risk level
-                if liquidation_risk_pct < 20:
-                    risk_emoji = "🟢"  # Low risk
-                    risk_text = "Low"
-                elif liquidation_risk_pct < 50:
-                    risk_emoji = "🟡"  # Medium risk
-                    risk_text = "Medium"
-                else:
-                    risk_emoji = "🔴"  # High risk
-                    risk_text = "High"
-                
-                lines.append(f"{risk_emoji} *Liquidation Risk:* %{liquidation_risk_pct:.2f} ({risk_text})")
-                lines.append("")
+            # lines.append("")
             
             # SL levels (header removed, showing SL directly)
             
@@ -303,7 +286,7 @@ class SignalFormatter(BaseFormatter):
             sl_levels = []
             # For Ranging strategy
             if is_ranging_strategy:
-                stop_info = custom_targets.get('stop_loss')
+                stop_info = custom_targets.get('sl') or custom_targets.get('stop_loss')
                 if stop_info and stop_info.get('price') is not None:
                     stop_price = stop_info.get('price')
                     try:
@@ -372,6 +355,10 @@ class SignalFormatter(BaseFormatter):
             # TP/SL hit timeline (show only hits, signal log removed)
             timeline: List[tuple[int, str]] = []
 
+            # Add Signal Created event
+            if created_at:
+                timeline.append((created_at, "Signal Created 🔔"))
+
             # Add TP/SL hits
             if tp_hit_times:
                 for level, ts in tp_hit_times.items():
@@ -422,6 +409,22 @@ class SignalFormatter(BaseFormatter):
             # Backslash appears as literal in code block, looks ugly
             lines.append(f"📈 Strategy: `{strategy_name}`")
             lines.append(f"⚡ Confidence: `{confidence_display}`")
+            
+            # Liquidation Risk Info (if available)
+            liquidation_risk_pct = signal_data.get('liquidation_risk_percentage')
+            if liquidation_risk_pct is not None:
+                # Select emoji based on risk level
+                if liquidation_risk_pct < 20:
+                    risk_emoji = "🟢"  # Low risk
+                    risk_text = "Low"
+                elif liquidation_risk_pct < 50:
+                    risk_emoji = "🟡"  # Medium risk
+                    risk_text = "Medium"
+                else:
+                    risk_emoji = "🔴"  # High risk
+                    risk_text = "High"
+                
+                lines.append(f"{risk_emoji} *Liquidation Risk:* %{liquidation_risk_pct:.2f} ({risk_text})")
             
             # 4H Confirmation: Show only if CONTRADICTS main direction or is not N/A.
             # If main direction is LONG and 4H is also Bullish (LONG), do not show (redundant).

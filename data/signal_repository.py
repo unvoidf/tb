@@ -316,7 +316,7 @@ class SignalRepository(BaseRepository):
 
                 cursor.execute(
                     """
-                    SELECT symbol, direction, confidence, created_at
+                    SELECT signal_id, symbol, direction, confidence, created_at
                     FROM signals
                     WHERE created_at >= ? 
                       AND (message_deleted = 0 OR message_deleted IS NULL)
@@ -336,6 +336,7 @@ class SignalRepository(BaseRepository):
                         continue
 
                     summaries.append({
+                        'signal_id': row['signal_id'],
                         'symbol': symbol,
                         'direction': row['direction'],
                         'confidence': row['confidence'],
@@ -575,8 +576,8 @@ class SignalRepository(BaseRepository):
         price: float,
         confidence: float,
         old_confidence: float,
-        min_log_interval_seconds: int = 600,  # 10 dakika default
-        min_confidence_change: float = 0.05  # %5 default
+        min_log_interval_seconds: int = 3600,  # 1 saat default
+        min_confidence_change: float = 0.10  # %10 default
     ) -> bool:
         """
         Adds a new entry to signal log (when new signal detected but active signal exists).

@@ -21,6 +21,7 @@ class SignalTracker:
         market_data: MarketDataManager,
         bot_manager: TelegramBotManager,
         message_formatter: MessageFormatter,
+        liquidation_safety_filter: Optional['LiquidationSafetyFilter'] = None,
         message_update_delay: float = 0.6
     ):
         """
@@ -37,6 +38,7 @@ class SignalTracker:
         self.market_data = market_data
         self.bot_manager = bot_manager
         self.formatter = message_formatter
+        self.liquidation_safety_filter = liquidation_safety_filter
         # Mesaj güncellemeleri arası minimum bekleme süresi (Telegram rate limit için)
         # Varsayılan 0.6 saniye (Telegram'ın flood control'üne takılmamak için)
         self.message_update_delay = message_update_delay if message_update_delay > 0 else 0.6
@@ -467,6 +469,44 @@ class SignalTracker:
             # En son confidence değişikliğini al
             confidence_change = self.repository.get_latest_confidence_change(signal_id)
             
+            # Liquidation Risk Hesaplama (Eksikse)
+            if 'liquidation_risk_percentage' not in signal_data and self.liquidation_safety_filter:
+                try:
+                    direction = signal.get('direction', 'NEUTRAL')
+                    # SL fiyatını al (custom_targets veya entry_levels'dan)
+                    sl_price = None
+                    
+                    # 1. Custom Targets kontrolü (Mean Reversion için)
+                    # custom_targets signal_data içinde bulunur (SignalRepository.row_to_dict ile parse edilmiş)
+                    custom_targets = signal_data.get('custom_targets', {})
+                    if custom_targets:
+                        # 'sl' veya 'stop_loss' key kontrolü
+                        sl_section = custom_targets.get('sl') or custom_targets.get('stop_loss')
+                        if sl_section:
+                            sl_price = sl_section.get('stop_loss')
+                            if sl_price is None:
+                                sl_price = sl_section.get('price')
+                    
+                    # 2. Entry Levels kontrolü (Trend için fallback)
+                    if sl_price is None:
+                         # entry_levels yapısını kontrol et
+                         # Genelde: {'sl_price': ...} veya {'conservative': {'sl_price': ...}}
+                         sl_price = entry_levels.get('sl_price')
+                    
+                    if sl_price and signal_price:
+                        default_balance = 10000.0
+                        risk_pct = self.liquidation_safety_filter.calculate_liquidation_risk_percentage(
+                            entry_price=signal_price,
+                            sl_price=sl_price,
+                            direction=direction,
+                            balance=default_balance
+                        )
+                        signal_data['liquidation_risk_percentage'] = risk_pct
+                        self.logger.info(f"Liquidation risk on-the-fly calculated for {symbol}: {risk_pct}%")
+                        
+                except Exception as e:
+                    self.logger.warning(f"On-the-fly liquidation risk calculation failed: {e}")
+
             # Mesajı yeniden formatla
             message = self.formatter.format_signal_alert(
                 symbol=symbol,
@@ -483,6 +523,21 @@ class SignalTracker:
                 signal_id=signal_id,
                 confidence_change=confidence_change
             )
+            
+            # DEBUG: Log formatter input to identify empty message cause
+            self.logger.debug(
+                f"Formatting message for {symbol}: signal_price={signal_price}, "
+                f"current_price={current_price}, entry_levels={entry_levels is not None}, "
+                f"signal_data keys={list(signal_data.keys()) if signal_data else 'None'}"
+            )
+            
+            # Mesajın boş olmadığını kontrol et (Telegram API empty message hatasını önlemek için)
+            if not message or not message.strip():
+                self.logger.error(
+                    f"Message formatter returned empty message for {symbol} (signal_id: {signal_id}). "
+                    f"Skipping Telegram update. Signal data might be corrupted or incomplete."
+                )
+                return
             
             # Rate limiting: Mesaj güncellemeleri arasında minimum delay
             current_time = time.time()
@@ -670,24 +725,12 @@ class SignalTracker:
                 if not all([signal_id, channel_id, message_id]):
                     continue
                     
-                # Mesajın varlığını kontrol et
-                # Telegram API'de doğrudan "check existence" yok, ama forward veya reply denemesi yapılabilir.
-                # Ancak en temiz yöntem, bot_manager üzerinden mesajı okumaya çalışmaktır.
-                # BotManager'a yeni bir metod eklememiz gerekebilir veya mevcut metodları kullanabiliriz.
-                # Şimdilik edit_channel_message metodunun 'message_not_found' dönüşünü kullanıyoruz.
-                # Ancak edit yapmak istemiyoruz, sadece kontrol.
-                # Bu yüzden TelegramBotManager'a 'check_message_exists' eklemek en doğrusu olurdu.
-                # Fakat şimdilik basit bir "sessiz edit" veya "get_messages" (eğer varsa) kullanılabilir.
-                # Telegram Bot API'de getMessage yok.
-                # Genelde kullanılan yöntem: forwardMessage (dummy chat'e) veya editMessageReplyMarkup (aynı markup ile).
-                
-                # Aynı markup ile edit yapmayı deneyelim.
+                # Mesajın varlığını kontrol et (sadece reply_markup güncelleyerek)
                 keyboard = self.formatter.create_signal_keyboard(signal_id)
-                success, message_not_found = self.bot_manager.edit_channel_message(
+                exists, message_not_found = self.bot_manager.check_message_exists(
                     channel_id=channel_id,
                     message_id=message_id,
-                    message=None, # Mesaj içeriğini değiştirme
-                    reply_markup=keyboard # Aynı klavyeyi gönder
+                    reply_markup=keyboard
                 )
                 
                 if message_not_found:

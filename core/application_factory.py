@@ -99,9 +99,12 @@ class ApplicationFactory:
         signal_database = self._create_signal_database()
         signal_repository = self._create_signal_repository(signal_database)
         
+        # Liquidation Safety Filter (Create before SignalTracker)
+        liquidation_safety_filter = self._create_liquidation_safety_filter(config)
+        
         # Signal Tracker System (Create before SignalScannerManager, will be injected)
         signal_tracker = self._create_signal_tracker(
-            signal_repository, market_data, telegram_bot, message_formatter
+            signal_repository, market_data, telegram_bot, message_formatter, liquidation_safety_filter
         )
         signal_tracker_scheduler = self._create_signal_tracker_scheduler(signal_tracker, config)
         
@@ -112,8 +115,7 @@ class ApplicationFactory:
         risk_reward_calc = RiskRewardCalculator()
         self.container.register_singleton(RiskRewardCalculator, risk_reward_calc)
         
-        # Liquidation Safety Filter
-        liquidation_safety_filter = self._create_liquidation_safety_filter(config)
+        # Liquidation Safety Filter (Moved up)
         
         # Signal Scanner System (Inject SignalTracker)
         signal_scanner_manager = self._create_signal_scanner_manager(
@@ -360,13 +362,15 @@ class ApplicationFactory:
     def _create_signal_tracker(self, signal_repository: SignalRepository,
                                market_data: MarketDataManager,
                                bot_manager: TelegramBotManager,
-                               message_formatter: MessageFormatter) -> SignalTracker:
+                               message_formatter: MessageFormatter,
+                               liquidation_safety_filter: LiquidationSafetyFilter = None) -> SignalTracker:
         """Creates signal tracker."""
         return SignalTracker(
             signal_repository=signal_repository,
             market_data=market_data,
             bot_manager=bot_manager,
-            message_formatter=message_formatter
+            message_formatter=message_formatter,
+            liquidation_safety_filter=liquidation_safety_filter
         )
     
     def _create_signal_tracker_scheduler(
