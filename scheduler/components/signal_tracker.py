@@ -1019,6 +1019,15 @@ class SignalTracker:
                     self.logger.error(f"Archiving error ({signal_id}): {str(e)}", exc_info=True)
             
             self.logger.info(f"Archive check completed: {archived_count}/{len(deleted_signals)} signals archived")
+            
+            # Archive rejected signals (Immediate archiving)
+            try:
+                rejected_count = self.archiver.archive_rejected_signals(age_hours=0)
+                if rejected_count > 0:
+                    self.logger.info(f"Archived {rejected_count} rejected signals")
+            except Exception as e:
+                self.logger.error(f"Rejected signals archiving error: {str(e)}")
+            
             self._last_archive_check_time = current_time
             
         except Exception as e:

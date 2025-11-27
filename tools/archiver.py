@@ -5,6 +5,7 @@ import logging
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import time
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 
@@ -98,6 +99,84 @@ class SignalArchiver:
         except Exception as e:
             self.logger.error(f"Failed to archive signal {signal_id}: {str(e)}", exc_info=True)
             return False
+
+    def archive_rejected_signals(self, age_hours: int = 0) -> int:
+        """
+        Archives rejected signals from SQLite to Parquet.
+        
+        Args:
+            age_hours: Minimum age in hours (default 0 for immediate archiving).
+            
+        Returns:
+            Number of archived signals.
+        """
+        try:
+            # 1. Determine cutoff time
+            cutoff_time = int(time.time()) - (age_hours * 3600)
+            
+            # 2. Fetch rejected signals
+            with self.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM rejected_signals WHERE created_at <= ?", 
+                    (cutoff_time,)
+                )
+                rows = cursor.fetchall()
+                rejected_data = [dict(row) for row in rows]
+            
+            if not rejected_data:
+                return 0
+                
+            self.logger.info(f"Found {len(rejected_data)} rejected signals to archive.")
+            
+            # 3. Group by Month (for partitioning)
+            grouped_data = {}
+            for item in rejected_data:
+                created_at = item.get('created_at', 0)
+                date_str = datetime.fromtimestamp(created_at).strftime('%Y-%m')
+                if date_str not in grouped_data:
+                    grouped_data[date_str] = []
+                grouped_data[date_str].append(item)
+            
+            # 4. Write to Parquet (per month)
+            rejected_archive_dir = os.path.join(self.archive_dir, "rejected_signals")
+            os.makedirs(rejected_archive_dir, exist_ok=True)
+            
+            archived_ids = []
+            
+            for date_str, items in grouped_data.items():
+                file_path = os.path.join(rejected_archive_dir, f"{date_str}.parquet")
+                df = pd.DataFrame(items)
+                
+                # Append to parquet
+                self._append_to_parquet(df, file_path)
+                
+                # Collect IDs for deletion
+                archived_ids.extend([item['id'] for item in items])
+            
+            # 5. Delete from SQLite
+            if archived_ids:
+                with self.db.get_db_context() as conn:
+                    cursor = conn.cursor()
+                    # SQLite limit is usually 999 variables, so we batch delete
+                    batch_size = 500
+                    for i in range(0, len(archived_ids), batch_size):
+                        batch = archived_ids[i:i + batch_size]
+                        placeholders = ','.join(['?'] * len(batch))
+                        cursor.execute(
+                            f"DELETE FROM rejected_signals WHERE id IN ({placeholders})",
+                            batch
+                        )
+                    conn.commit()
+                
+                self.logger.info(f"Successfully archived and deleted {len(archived_ids)} rejected signals.")
+                return len(archived_ids)
+                
+            return 0
+
+        except Exception as e:
+            self.logger.error(f"Failed to archive rejected signals: {str(e)}", exc_info=True)
+            return 0
 
     def migrate_all(self, batch_size: int = 100, dry_run: bool = False) -> int:
         """
