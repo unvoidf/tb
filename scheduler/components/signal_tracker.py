@@ -209,95 +209,123 @@ class SignalTracker:
 
             self._log_signal_snapshot(signal, current_price, direction)
             
-            # 1) SAVE SNAPSHOT
-            self.repository.save_price_snapshot(
-                signal_id=signal_id,
-                timestamp=int(time.time()),
-                price=current_price,
-                source='tracker_tick'
-            )
+            # 1. Update Metrics (Snapshot, MFE/MAE, Alt Entry)
+            mfe_updated, mae_updated, old_mfe, old_mae = self._update_signal_metrics(signal, current_price, direction)
             
-            # 2) UPDATE MFE/MAE
-            # Store old values first (for threshold check)
-            old_mfe_price_before_update = signal.get('mfe_price')
-            old_mae_price_before_update = signal.get('mae_price')
+            # 2. Check TP/SL Status
+            tp_hits, sl_hits = self._check_tp_sl_status(signal, current_price, direction)
             
-            mfe_updated, mae_updated = self._update_mfe_mae(signal, current_price, direction)
+            # 3. Evaluate Update Condition (Hybrid Logic)
+            mfe_mae_info = {
+                'mfe_updated': mfe_updated,
+                'mae_updated': mae_updated,
+                'old_mfe': old_mfe,
+                'old_mae': old_mae
+            }
+            should_update, update_reasons = self._evaluate_update_condition(signal, current_price, direction, tp_hits, sl_hits, mfe_mae_info)
             
-            # If MFE/MAE updated, update signal dict (for threshold check)
-            if mfe_updated:
-                signal['mfe_price'] = current_price
-                signal['mfe_at'] = int(time.time())
-            if mae_updated:
-                signal['mae_price'] = current_price
-                signal['mae_at'] = int(time.time())
-            
-            # 3) ALTERNATIVE ENTRY HIT CHECK
-            self._check_alternative_entry_hit(signal, current_price, direction)
-            
-            # 4) FINALIZE CHECK (REMOVED)
-            # 72-hour rule cancelled. Signal activity depends only on Telegram message existence.
-            # if self._should_finalize_signal(signal):
-            #     final_outcome = self._determine_final_outcome(signal)
-            #     self.repository.finalize_signal(signal_id, current_price, final_outcome)
-            #     self.logger.info(f"Signal finalized: {signal_id} - {final_outcome}")
-            
-            # Check TP levels
-            tp_hits = self._check_tp_levels(signal, current_price, direction)
-            
-            # Check SL levels
-            sl_hits = self._check_sl_levels(signal, current_price, direction)
-            
-            # HYBRID MESSAGE UPDATE LOGIC
-            # 1. New hit check (priority)
-            has_new_tp_hits = any(tp_hits.values()) if tp_hits else False
-            has_new_sl_hits = any(sl_hits.values()) if sl_hits else False
-            
-            # 2. MFE/MAE threshold check
-            # Pass old values as parameters (for threshold check)
-            mfe_mae_threshold_crossed = self._check_mfe_mae_threshold_crossed(
-                signal, current_price, direction, mfe_updated, mae_updated,
-                old_mfe_price_before_update, old_mae_price_before_update
-            )
-            
-            # 3. Timeout check for hit signals (fall-back)
-            hit_signal_timeout_reached = self._check_hit_signal_timeout(signal)
-            
-            # 4. Confidence change check (bonus)
-            confidence_changed = self._check_confidence_change(signal)
-            
-            # Message update condition (hybrid)
-            should_update = (
-                has_new_tp_hits or 
-                has_new_sl_hits or 
-                mfe_mae_threshold_crossed or 
-                hit_signal_timeout_reached or 
-                confidence_changed
-            )
-            
+            # 4. Process Update
             if should_update:
-                update_reasons = []
-                if has_new_tp_hits or has_new_sl_hits:
-                    update_reasons.append(f"new hit (TP: {has_new_tp_hits}, SL: {has_new_sl_hits})")
-                if mfe_mae_threshold_crossed:
-                    update_reasons.append("MFE/MAE threshold")
-                if hit_signal_timeout_reached:
-                    update_reasons.append("hit signal timeout")
-                if confidence_changed:
-                    update_reasons.append("confidence change")
-                
-                self.logger.debug(
-                    f"{symbol} message update required - "
-                    f"Reasons: {', '.join(update_reasons)}"
-                )
-                # Update message (confidence_change will be calculated inside)
-                self._update_telegram_message(signal, tp_hits, sl_hits)
+                self._process_signal_update(signal, tp_hits, sl_hits, update_reasons)
             else:
-                # Update not required
                 self.logger.debug(f"{symbol} update not required")
                 
         except Exception as e:
             self.logger.error(f"Signal level check error: {str(e)}", exc_info=True)
+
+    def _update_signal_metrics(self, signal: Dict, current_price: float, direction: str) -> tuple:
+        """Updates snapshot, MFE/MAE, and alternative entry hits."""
+        # 1) SAVE SNAPSHOT
+        self.repository.save_price_snapshot(
+            signal_id=signal.get('signal_id'),
+            timestamp=int(time.time()),
+            price=current_price,
+            source='tracker_tick'
+        )
+        
+        # 2) UPDATE MFE/MAE
+        # Store old values first (for threshold check)
+        old_mfe = signal.get('mfe_price')
+        old_mae = signal.get('mae_price')
+        
+        mfe_updated, mae_updated = self._update_mfe_mae(signal, current_price, direction)
+        
+        # If MFE/MAE updated, update signal dict (for threshold check)
+        if mfe_updated:
+            signal['mfe_price'] = current_price
+            signal['mfe_at'] = int(time.time())
+        if mae_updated:
+            signal['mae_price'] = current_price
+            signal['mae_at'] = int(time.time())
+        
+        # 3) ALTERNATIVE ENTRY HIT CHECK
+        self._check_alternative_entry_hit(signal, current_price, direction)
+        
+        return mfe_updated, mae_updated, old_mfe, old_mae
+
+    def _check_tp_sl_status(self, signal: Dict, current_price: float, direction: str) -> tuple:
+        """Checks TP and SL levels."""
+        tp_hits = self._check_tp_levels(signal, current_price, direction)
+        sl_hits = self._check_sl_levels(signal, current_price, direction)
+        return tp_hits, sl_hits
+
+    def _evaluate_update_condition(
+        self, 
+        signal: Dict, 
+        current_price: float, 
+        direction: str, 
+        tp_hits: Dict, 
+        sl_hits: Dict, 
+        mfe_mae_info: Dict
+    ) -> tuple:
+        """Evaluates if message update is required."""
+        # 1. New hit check (priority)
+        has_new_tp_hits = any(tp_hits.values()) if tp_hits else False
+        has_new_sl_hits = any(sl_hits.values()) if sl_hits else False
+        
+        # 2. MFE/MAE threshold check
+        mfe_mae_threshold_crossed = self._check_mfe_mae_threshold_crossed(
+            signal, current_price, direction, 
+            mfe_mae_info['mfe_updated'], mfe_mae_info['mae_updated'],
+            mfe_mae_info['old_mfe'], mfe_mae_info['old_mae']
+        )
+        
+        # 3. Timeout check for hit signals (fall-back)
+        hit_signal_timeout_reached = self._check_hit_signal_timeout(signal)
+        
+        # 4. Confidence change check (bonus)
+        confidence_changed = self._check_confidence_change(signal)
+        
+        should_update = (
+            has_new_tp_hits or 
+            has_new_sl_hits or 
+            mfe_mae_threshold_crossed or 
+            hit_signal_timeout_reached or 
+            confidence_changed
+        )
+        
+        update_reasons = []
+        if should_update:
+            if has_new_tp_hits or has_new_sl_hits:
+                update_reasons.append(f"new hit (TP: {has_new_tp_hits}, SL: {has_new_sl_hits})")
+            if mfe_mae_threshold_crossed:
+                update_reasons.append("MFE/MAE threshold")
+            if hit_signal_timeout_reached:
+                update_reasons.append("hit signal timeout")
+            if confidence_changed:
+                update_reasons.append("confidence change")
+                
+        return should_update, update_reasons
+
+    def _process_signal_update(self, signal: Dict, tp_hits: Dict, sl_hits: Dict, update_reasons: list) -> None:
+        """Logs reasons and updates Telegram message."""
+        symbol = signal.get('symbol')
+        self.logger.debug(
+            f"{symbol} message update required - "
+            f"Reasons: {', '.join(update_reasons)}"
+        )
+        # Update message (confidence_change will be calculated inside)
+        self._update_telegram_message(signal, tp_hits, sl_hits)
     
     def update_message_for_signal(self, signal: Dict) -> None:
         """
