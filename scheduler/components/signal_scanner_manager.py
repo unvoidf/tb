@@ -150,8 +150,8 @@ class SignalScannerManager:
         Performs signal check for a single coin.
         
         Args:
-            symbol: Trading pair (örn: BTC/USDT)
-            stats: İstatistik dict (referans olarak güncellenir)
+            symbol: Trading pair (e.g., BTC/USDT)
+            stats: Statistics dict (updated by reference)
         """
         try:
             # Analyze signal for coin (with return_reason=True)
@@ -176,149 +176,16 @@ class SignalScannerManager:
                 self.logger.error(f"{symbol} signal_data is NOT a dict! Type: {type(signal_data)}, Value: {signal_data}")
                 if stats: stats['NO_SIGNAL'] += 1
                 return
-            
-            # Get general signal info
-            overall_direction = signal_data.get('direction')
-            overall_confidence = signal_data.get('confidence', 0.0)
-            
-            # Calculate bonus scores with SignalRanker
-            # Format expected by SignalRanker: [{'symbol': str, 'signal': dict}]
-            signal_for_ranker = [{
-                'symbol': symbol,
-                'signal': signal_data
-            }]
-            
-            # Calculate total score with RSI and volume bonuses
-            ranked_signals = self.signal_ranker.rank_signals(signal_for_ranker, top_count=1)
-            
-            if ranked_signals:
-                # Ranked signal found, get total score directly (no recalculation!)
-                ranked_signal = ranked_signals[0]
-                
-                # _ranking_info from SignalRanker contains all score info
-                ranking_info = ranked_signal.get('_ranking_info', {})
-                total_score = ranking_info.get('total_score', 0.0)
-                rsi_bonus = ranking_info.get('rsi_bonus', 0.0)
-                volume_bonus = ranking_info.get('volume_bonus', 0.0)
-                base_score = ranking_info.get('base_score', 0.0)
 
-                # BUG FIX: Update reported confidence score with total_score including bonuses.
-                # This ensures the score filtered is the same as the one shown to the user.
-                # Confidence value cannot exceed 100% (1.0 cap)
-                capped_confidence = min(total_score, 1.0)
-                signal_data['confidence'] = capped_confidence
-                
-                if total_score > 1.0:
-                    self.logger.warning(
-                        f"{symbol} total_score {total_score:.3f} > 1.0, confidence {capped_confidence:.3f} olarak cap'lendi"
-                    )
-                
-                self.logger.debug(
-                    f"{symbol} sinyal: direction={overall_direction}, "
-                    f"base_confidence={overall_confidence:.3f}, "
-                    f"rsi_bonus={rsi_bonus:.3f}, volume_bonus={volume_bonus:.3f}, "
-                    f"total_score={total_score:.3f}, capped_confidence={capped_confidence:.3f}"
-                )
-                
-                # Confidence threshold check (direction-specific)
-                # Data: LONG 6.67% WR vs SHORT 36.84% WR → Different thresholds
-                direction = signal_data.get('direction', 'NEUTRAL')
-                min_threshold = self._get_direction_threshold(direction)
-                
-                if total_score < min_threshold:
-                    self._log_rejection_scorecard(
-                        symbol, total_score, min_threshold,
-                        signal_data, ranking_info
-                    )
-                    if stats: stats['REJECTED_CONFIDENCE'] += 1
-                    return
-            else:
-                # Could not be ranked (below threshold)
-                self.logger.debug(
-                    f"{symbol} sinyal: direction={overall_direction}, "
-                    f"confidence={overall_confidence:.3f} (rank edilemedi)"
-                )
-                
-                # Direction-specific threshold check
-                min_threshold = self._get_direction_threshold(overall_direction)
-                
-                if overall_confidence < min_threshold:
-                    self._log_rejection_scorecard(
-                        symbol, overall_confidence, min_threshold,
-                        signal_data, None
-                    )
-                    if stats: stats['REJECTED_CONFIDENCE'] += 1
-                    return
-            
-            # ATR Minimum Filter (Data: 51.7% failure for ATR <2%)
-            atr_value = signal_data.get('atr')
-            entry_price = signal_data.get('entry_price') or signal_data.get('signal_price')
-            
-            if atr_value and entry_price:
-                atr_percent = (atr_value / entry_price) * 100
-                min_atr = self.config.min_atr_percent if self.config else 2.0
-                
-                if atr_percent < min_atr:
-                    self.logger.warning(
-                        f"{symbol} rejected: ATR too low ({atr_percent:.2f}% < {min_atr}%). "
-                        f"Low volatility signals are unreliable (51.7% historical failure rate)."
-                    )
-                    if stats: 
-                        if 'REJECTED_LOW_ATR' not in stats:
-                            stats['REJECTED_LOW_ATR'] = 0
-                        stats['REJECTED_LOW_ATR'] += 1
-                    return
-            
-            # Trending market + opposite direction = mismatch
-            # NEUTRAL direction signals are not sent to channel (UX/noise control)
-            if overall_direction == 'NEUTRAL':
-                self.logger.debug(
-                    f"{symbol} sinyali NEUTRAL (score={total_score:.3f}); kanal bildirimi atlandı"
-                )
-                if stats: stats['NO_SIGNAL'] += 1 # NEUTRAL teknik olarak sinyal değil
+            # 1. Calculate Score & Check Thresholds
+            total_score, is_rejected = self._calculate_signal_score(symbol, signal_data, stats)
+            if is_rejected:
                 return
-            
-            # TREND-DIRECTION MISMATCH CHECK (Financial Expert Recommendation)
-            # LONG signal in trending_down, SHORT signal in trending_up should be rejected
-            market_context = signal_data.get('market_context', {})
-            regime = market_context.get('regime')
-            adx_strength = market_context.get('adx_strength', 0)
-            
-            if regime == 'trending_down' and overall_direction == 'LONG':
-                self.logger.info(
-                    f"{symbol} LONG sinyali reddedildi: Market regime 'trending_down' "
-                    f"(ADX={adx_strength:.1f}). Trend-yön uyumsuzluğu."
-                )
-                if stats: stats['REJECTED_TREND'] += 1
+
+            # 2. Validate Filters (ATR, Trend Mismatch, Ranging)
+            is_valid = self._validate_signal_filters(symbol, signal_data, total_score, stats)
+            if not is_valid:
                 return
-            
-            if regime == 'trending_up' and overall_direction == 'SHORT':
-                self.logger.info(
-                    f"{symbol} SHORT sinyali reddedildi: Market regime 'trending_up' "
-                    f"(ADX={adx_strength:.1f}). Trend-yön uyumsuzluğu."
-                )
-                if stats: stats['REJECTED_TREND'] += 1
-                return
-            
-            # VOLATILITY FILTER (Financial Expert Recommendation)
-            # NOTE: Volatility penalty is already applied in adaptive_thresholds.py.
-            # Applying it here again creates a "double penalty".
-            # Therefore, this code block is disabled.
-            # volatility_percentile = market_context.get('volatility_percentile', 50.0)
-            # if volatility_percentile > 80: ... (REMOVED)
-            
-            # RANGING MARKET FILTER (Financial Expert Recommendation)
-            # Only high confidence signals should pass in ranging market
-            if regime == 'ranging' or adx_strength < 25:
-                # Raise threshold in ranging market or weak trend
-                ranging_threshold = 0.8
-                if total_score < ranging_threshold:
-                    self.logger.info(
-                        f"{symbol} ranging/zayıf trend (ADX={adx_strength:.1f}), "
-                        f"score={total_score:.3f} < {ranging_threshold}, atlandı"
-                    )
-                    if stats: stats['REJECTED_CONFIDENCE'] += 1 # Stuck at high threshold
-                    return
 
             # Successful signal
             if stats: stats['GENERATED'] += 1
@@ -329,7 +196,7 @@ class SignalScannerManager:
             self._temp_signal_data[symbol] = signal_data
 
             # Active signal check
-            should_send = self._should_send_notification(symbol, overall_direction, signal_data)
+            should_send = self._should_send_notification(symbol, signal_data.get('direction'), signal_data)
             if not should_send:
                 return
             
@@ -338,6 +205,115 @@ class SignalScannerManager:
             
         except Exception as e:
             self.logger.error(f"{symbol} sinyal kontrolü hatası: {str(e)}", exc_info=True)
+
+    def _calculate_signal_score(self, symbol: str, signal_data: Dict, stats: Dict = None) -> Tuple[float, bool]:
+        """
+        Calculates signal score and checks confidence thresholds.
+        Returns (total_score, is_rejected).
+        """
+        overall_direction = signal_data.get('direction')
+        overall_confidence = signal_data.get('confidence', 0.0)
+        
+        # Calculate bonus scores with SignalRanker
+        signal_for_ranker = [{'symbol': symbol, 'signal': signal_data}]
+        ranked_signals = self.signal_ranker.rank_signals(signal_for_ranker, top_count=1)
+        
+        if ranked_signals:
+            ranked_signal = ranked_signals[0]
+            ranking_info = ranked_signal.get('_ranking_info', {})
+            total_score = ranking_info.get('total_score', 0.0)
+            
+            # Cap confidence at 1.0
+            capped_confidence = min(total_score, 1.0)
+            signal_data['confidence'] = capped_confidence
+            
+            if total_score > 1.0:
+                self.logger.warning(
+                    f"{symbol} total_score {total_score:.3f} > 1.0, confidence {capped_confidence:.3f} olarak cap'lendi"
+                )
+            
+            self.logger.debug(
+                f"{symbol} sinyal: direction={overall_direction}, "
+                f"base_confidence={overall_confidence:.3f}, "
+                f"rsi_bonus={ranking_info.get('rsi_bonus', 0.0):.3f}, "
+                f"volume_bonus={ranking_info.get('volume_bonus', 0.0):.3f}, "
+                f"total_score={total_score:.3f}, capped_confidence={capped_confidence:.3f}"
+            )
+            
+            # Confidence threshold check
+            min_threshold = self._get_direction_threshold(overall_direction)
+            
+            if total_score < min_threshold:
+                self._log_rejection_scorecard(symbol, total_score, min_threshold, signal_data, ranking_info)
+                if stats: stats['REJECTED_CONFIDENCE'] += 1
+                return total_score, True
+        else:
+            # Could not be ranked
+            self.logger.debug(f"{symbol} sinyal: direction={overall_direction}, confidence={overall_confidence:.3f} (rank edilemedi)")
+            min_threshold = self._get_direction_threshold(overall_direction)
+            
+            if overall_confidence < min_threshold:
+                self._log_rejection_scorecard(symbol, overall_confidence, min_threshold, signal_data, None)
+                if stats: stats['REJECTED_CONFIDENCE'] += 1
+                return overall_confidence, True
+                
+        return signal_data.get('confidence', overall_confidence), False
+
+    def _validate_signal_filters(self, symbol: str, signal_data: Dict, total_score: float, stats: Dict = None) -> bool:
+        """
+        Validates signal against ATR, Trend Mismatch, and Ranging filters.
+        Returns True if valid, False if rejected.
+        """
+        overall_direction = signal_data.get('direction')
+        
+        # ATR Minimum Filter
+        atr_value = signal_data.get('atr')
+        entry_price = signal_data.get('entry_price') or signal_data.get('signal_price')
+        
+        if atr_value and entry_price:
+            atr_percent = (atr_value / entry_price) * 100
+            min_atr = self.config.min_atr_percent if self.config else 2.0
+            
+            if atr_percent < min_atr:
+                self.logger.warning(
+                    f"{symbol} rejected: ATR too low ({atr_percent:.2f}% < {min_atr}%). "
+                    f"Low volatility signals are unreliable (51.7% historical failure rate)."
+                )
+                if stats: 
+                    if 'REJECTED_LOW_ATR' not in stats: stats['REJECTED_LOW_ATR'] = 0
+                    stats['REJECTED_LOW_ATR'] += 1
+                return False
+        
+        # NEUTRAL check
+        if overall_direction == 'NEUTRAL':
+            self.logger.debug(f"{symbol} sinyali NEUTRAL (score={total_score:.3f}); kanal bildirimi atlandı")
+            if stats: stats['NO_SIGNAL'] += 1
+            return False
+        
+        # Trend-Direction Mismatch Check
+        market_context = signal_data.get('market_context', {})
+        regime = market_context.get('regime')
+        adx_strength = market_context.get('adx_strength', 0)
+        
+        if regime == 'trending_down' and overall_direction == 'LONG':
+            self.logger.info(f"{symbol} LONG sinyali reddedildi: Market regime 'trending_down' (ADX={adx_strength:.1f}). Trend-yön uyumsuzluğu.")
+            if stats: stats['REJECTED_TREND'] += 1
+            return False
+        
+        if regime == 'trending_up' and overall_direction == 'SHORT':
+            self.logger.info(f"{symbol} SHORT sinyali reddedildi: Market regime 'trending_up' (ADX={adx_strength:.1f}). Trend-yön uyumsuzluğu.")
+            if stats: stats['REJECTED_TREND'] += 1
+            return False
+            
+        # Ranging Market Filter
+        if regime == 'ranging' or adx_strength < 25:
+            ranging_threshold = 0.8
+            if total_score < ranging_threshold:
+                self.logger.info(f"{symbol} ranging/zayıf trend (ADX={adx_strength:.1f}), score={total_score:.3f} < {ranging_threshold}, atlandı")
+                if stats: stats['REJECTED_CONFIDENCE'] += 1
+                return False
+                
+        return True
 
     
     def _should_send_notification(self, symbol: str, direction: str, signal_data: Dict) -> bool:
@@ -468,205 +444,22 @@ class SignalScannerManager:
             signal_data: Signal data
         """
         try:
-            # Price at signal generation time (signal_price)
-            current_price = self.market_data.get_latest_price(symbol)
-            signal_price = current_price
-            signal_created_at = int(time.time())
-            
-            if not current_price:
-                self.logger.warning(f"{symbol} güncel fiyat alınamadı")
+            # 1. Prepare Context (Prices, OHLCV, Entry Levels)
+            context = self._prepare_signal_context(symbol, signal_data)
+            if not context:
                 return
-            
-            # Calculate dynamic entry levels
-            direction = signal_data.get('direction')
-            confidence = signal_data.get('confidence', 0.0)
-            strategy_type = signal_data.get('strategy_type', 'trend')
-            custom_targets = signal_data.get('custom_targets') if isinstance(signal_data.get('custom_targets'), dict) else {}
-            
-            # Get OHLCV data (for entry calculation)
-            df = None
-            atr = None
-            
-            try:
-                # Get data from 1h timeframe
-                df = self.market_data.fetch_ohlcv(symbol, '1h', 200)
-                
-                # Calculate ATR (correct class name: TechnicalIndicatorCalculator)
-                if df is not None and len(df) > 14:
-                    from analysis.technical_indicators import TechnicalIndicatorCalculator
-                    indicators = TechnicalIndicatorCalculator()
-                    atr = indicators.calculate_atr(df, period=14)
-            except Exception as e:
-                self.logger.warning(f"{symbol} OHLCV/ATR hesaplama hatası: {str(e)}")
-            
-            # Calculate entry levels
-            entry_levels = self.entry_calc.calculate_entry_levels(
-                symbol=symbol,
-                direction=direction,
-                current_price=current_price,
-                df=df,
-                atr=atr,
-                timeframe='1h'
-            )
-            
-            # Get current price again at sending time (to show small differences)
-            now_price = self.market_data.get_latest_price(symbol)
-            if not now_price:
-                now_price = signal_price
-            current_price_timestamp = int(time.time())
 
-            # Generate Signal ID (to be shown in message format)
-            signal_id = None
-            if self.signal_repository:
-                signal_id = self.signal_repository.generate_signal_id(symbol)
+            # 2. Analyze Liquidation Risk
+            self._analyze_liquidation_risk(symbol, signal_data, context)
 
-            # Liquidation risk analysis (To be shown in Telegram message - BEFORE format_signal_alert)
-            if self.liquidation_safety_filter:
-                try:
-                    # Calculate TP/SL levels (for liquidation risk analysis)
-                    if strategy_type == 'ranging' and custom_targets:
-                        tp_sl_levels = self._build_custom_tp_sl_levels(custom_targets)
-                    else:
-                        tp_sl_levels = self._calculate_tp_sl_levels(
-                            signal_price=signal_price,
-                            direction=direction,
-                            atr=atr,
-                            timeframe='1h'
-                        )
-                    
-                    # Get SL price (single stop-loss)
-                    sl_price = tp_sl_levels.get('sl_price')
-                    
-                    if sl_price and sl_price > 0:
-                        # Default balance (can be read from config in real market)
-                        default_balance = 10000.0  # USDT
-                        
-                        liquidation_risk_percentage = self.liquidation_safety_filter.calculate_liquidation_risk_percentage(
-                            entry_price=signal_price,
-                            sl_price=sl_price,
-                            direction=direction,
-                            balance=default_balance
-                        )
-                        
-                        # Add to signal_data (to be shown in Telegram message)
-                        if 'liquidation_risk_percentage' not in signal_data:
-                            signal_data['liquidation_risk_percentage'] = liquidation_risk_percentage
-                        
-                        # Write to log
-                        self.logger.info(
-                            f"Bu sinyal %{liquidation_risk_percentage:.2f} likidite riski taşımaktadır. "
-                            f"(Signal ID: {signal_id}, Symbol: {symbol})"
-                        )
-                        
-                except Exception as liq_error:
-                    self.logger.warning(
-                        f"Liquidation risk analizi yapılamadı: {str(liq_error)} - "
-                        f"Signal ID: {signal_id}, Symbol: {symbol}",
-                        exc_info=True
-                    )
-
-            # Format message
-            message = self.formatter.format_signal_alert(
-                symbol=symbol,
-                signal_data=signal_data,
-                entry_levels=entry_levels,
-                signal_price=signal_price,
-                now_price=now_price,
-                created_at=signal_created_at,
-                current_price_timestamp=current_price_timestamp,
-                tp_hit_times=None,
-                sl_hit_times=None,
-                signal_id=signal_id,
-                confidence_change=None  # New signal, no change
-            )
-            
-            # Create inline keyboard
-            keyboard = self.formatter.create_signal_keyboard(signal_id)
-            
-            # Send to Telegram channel and get message_id (with keyboard)
-            message_id = self._send_to_channel(message, reply_markup=keyboard)
-            
-            if message_id:
-                self.logger.info(
-                    f"{symbol} sinyal bildirimi gönderildi (dir={direction}, score={confidence:.3f}) - "
-                    f"Message ID: {message_id}, Signal ID: {signal_id}"
-                )
-                
-                # Save signal to database
-                if self.signal_repository and signal_id:
-                    try:
-                        self._save_signal_to_db(
-                            symbol=symbol,
-                            signal_data=signal_data,
-                            entry_levels=entry_levels,
-                            signal_price=signal_price,
-                            atr=atr,
-                            timeframe='1h',
-                            telegram_message_id=message_id,
-                            telegram_channel_id=self.channel_id,
-                            signal_id=signal_id
-                        )
-                    except Exception as db_error:
-                        self.logger.error(
-                            f"{symbol} sinyal veritabanına kaydedilemedi: {str(db_error)} - "
-                            f"Signal ID: {signal_id}, Message ID: {message_id}",
-                            exc_info=True
-                        )
-
-                # Update cache (active signal exists)
-                self._update_signal_cache(
-                    symbol=symbol,
-                    has_active_signal=True,
-                    signal_id=signal_id,
-                    direction=direction,
-                    confidence=confidence,
-                    timestamp=signal_created_at,
-                    source='send'
-                )
-            else:
-                # Message could not be sent or message_id could not be obtained
-                error_msg = (
-                    f"{symbol} sinyal bildirimi gönderilemedi veya message_id alınamadı - "
-                    f"Signal ID: {signal_id if signal_id else 'None'}"
-                )
-                self.logger.error(error_msg)
-                
-                # Eğer signal_id varsa, bu durumu daha detaylı logla
-                # (Message might be sent but message_id missing)
-                if signal_id:
-                    self.logger.warning(
-                        f"⚠️ KRİTİK: {symbol} için sinyal mesajı gönderilmeye çalışıldı ama "
-                        f"message_id alınamadı. Signal ID: {signal_id}. "
-                        f"Eğer mesaj Telegram'da görünüyorsa, bu sinyal veritabanına kaydedilmemiş olabilir. "
-                        f"Bu sinyal manuel olarak veritabanına eklenmelidir."
-                    )
-                
-                # IMPORTANT: Cache update must be done even if message_id is missing
-                # Because message might be sent to Telegram (but message_id missing)
-                # In this case active signal check must work so same signal is not sent again
-                # Cache update is critical for active signal check
-                self.logger.warning(
-                    f"{symbol} için cache güncelleniyor (message_id alınamadı ama aktif sinyal korunmalı) - "
-                    f"Signal ID: {signal_id}, Direction: {direction}, Timestamp: {signal_created_at}"
-                )
-                self._update_signal_cache(
-                    symbol=symbol,
-                    has_active_signal=True,
-                    signal_id=signal_id,
-                    direction=direction,
-                    confidence=confidence,
-                    timestamp=signal_created_at,
-                    source='send-failed'  # Use 'send-failed' as source
-                )
+            # 3. Dispatch Signal (Format, Send, Save, Cache)
+            self._dispatch_signal(symbol, signal_data, context)
             
         except Exception as e:
             self.logger.error(f"{symbol} bildirim gönderme hatası: {str(e)}", exc_info=True)
             
             # Cache update must be done even in exception case (active signal must be preserved)
-            # If message was attempted to be sent but exception occurred,
-            # cache must be updated for active signal check to work
             try:
-                # signal_data is available as parameter so can be accessed directly
                 direction = signal_data.get('direction')
                 confidence = signal_data.get('confidence', 0.0)
                 signal_created_at = int(time.time())
@@ -682,13 +475,215 @@ class SignalScannerManager:
                         direction=direction,
                         confidence=confidence,
                         timestamp=signal_created_at,
-                        source='send-exception'  # Use 'send-exception' as source
+                        source='send-exception'
                     )
             except Exception as cache_error:
                 self.logger.error(
                     f"{symbol} cache güncelleme hatası (exception durumunda): {str(cache_error)}",
                     exc_info=True
                 )
+
+    def _prepare_signal_context(self, symbol: str, signal_data: Dict) -> Optional[Dict]:
+        """Fetches data and calculates entry levels."""
+        try:
+            # Price at signal generation time
+            current_price = self.market_data.get_latest_price(symbol)
+            if not current_price:
+                self.logger.warning(f"{symbol} güncel fiyat alınamadı")
+                return None
+            
+            signal_price = current_price
+            signal_created_at = int(time.time())
+            
+            # Get OHLCV data
+            df = None
+            atr = None
+            try:
+                df = self.market_data.fetch_ohlcv(symbol, '1h', 200)
+                if df is not None and len(df) > 14:
+                    from analysis.technical_indicators import TechnicalIndicatorCalculator
+                    indicators = TechnicalIndicatorCalculator()
+                    atr = indicators.calculate_atr(df, period=14)
+            except Exception as e:
+                self.logger.warning(f"{symbol} OHLCV/ATR hesaplama hatası: {str(e)}")
+            
+            # Calculate entry levels
+            entry_levels = self.entry_calc.calculate_entry_levels(
+                symbol=symbol,
+                direction=signal_data.get('direction'),
+                current_price=current_price,
+                df=df,
+                atr=atr,
+                timeframe='1h'
+            )
+            
+            # Get current price again at sending time
+            now_price = self.market_data.get_latest_price(symbol)
+            if not now_price:
+                now_price = signal_price
+            current_price_timestamp = int(time.time())
+
+            # Generate Signal ID
+            signal_id = None
+            if self.signal_repository:
+                signal_id = self.signal_repository.generate_signal_id(symbol)
+                
+            return {
+                'signal_price': signal_price,
+                'now_price': now_price,
+                'signal_created_at': signal_created_at,
+                'current_price_timestamp': current_price_timestamp,
+                'df': df,
+                'atr': atr,
+                'entry_levels': entry_levels,
+                'signal_id': signal_id
+            }
+        except Exception as e:
+            self.logger.error(f"{symbol} context hazırlama hatası: {str(e)}", exc_info=True)
+            return None
+
+    def _analyze_liquidation_risk(self, symbol: str, signal_data: Dict, context: Dict) -> None:
+        """Analyzes and logs liquidation risk."""
+        if not self.liquidation_safety_filter:
+            return
+
+        try:
+            signal_price = context['signal_price']
+            direction = signal_data.get('direction')
+            atr = context['atr']
+            strategy_type = signal_data.get('strategy_type', 'trend')
+            custom_targets = signal_data.get('custom_targets') if isinstance(signal_data.get('custom_targets'), dict) else {}
+            signal_id = context['signal_id']
+
+            # Calculate TP/SL levels
+            if strategy_type == 'ranging' and custom_targets:
+                tp_sl_levels = self._build_custom_tp_sl_levels(custom_targets)
+            else:
+                tp_sl_levels = self._calculate_tp_sl_levels(
+                    signal_price=signal_price,
+                    direction=direction,
+                    atr=atr,
+                    timeframe='1h'
+                )
+            
+            sl_price = tp_sl_levels.get('sl_price')
+            
+            if sl_price and sl_price > 0:
+                default_balance = 10000.0
+                liquidation_risk_percentage = self.liquidation_safety_filter.calculate_liquidation_risk_percentage(
+                    entry_price=signal_price,
+                    sl_price=sl_price,
+                    direction=direction,
+                    balance=default_balance
+                )
+                
+                if 'liquidation_risk_percentage' not in signal_data:
+                    signal_data['liquidation_risk_percentage'] = liquidation_risk_percentage
+                
+                self.logger.info(
+                    f"Bu sinyal %{liquidation_risk_percentage:.2f} likidite riski taşımaktadır. "
+                    f"(Signal ID: {signal_id}, Symbol: {symbol})"
+                )
+        except Exception as liq_error:
+            self.logger.warning(
+                f"Liquidation risk analizi yapılamadı: {str(liq_error)} - "
+                f"Signal ID: {context.get('signal_id')}, Symbol: {symbol}",
+                exc_info=True
+            )
+
+    def _dispatch_signal(self, symbol: str, signal_data: Dict, context: Dict) -> None:
+        """Formats message, sends to Telegram, saves to DB, and updates cache."""
+        signal_id = context['signal_id']
+        direction = signal_data.get('direction')
+        confidence = signal_data.get('confidence', 0.0)
+        
+        # Format message
+        message = self.formatter.format_signal_alert(
+            symbol=symbol,
+            signal_data=signal_data,
+            entry_levels=context['entry_levels'],
+            signal_price=context['signal_price'],
+            now_price=context['now_price'],
+            created_at=context['signal_created_at'],
+            current_price_timestamp=context['current_price_timestamp'],
+            tp_hit_times=None,
+            sl_hit_times=None,
+            signal_id=signal_id,
+            confidence_change=None
+        )
+        
+        # Create keyboard
+        keyboard = self.formatter.create_signal_keyboard(signal_id)
+        
+        # Send to Telegram
+        message_id = self._send_to_channel(message, reply_markup=keyboard)
+        
+        if message_id:
+            self.logger.info(
+                f"{symbol} sinyal bildirimi gönderildi (dir={direction}, score={confidence:.3f}) - "
+                f"Message ID: {message_id}, Signal ID: {signal_id}"
+            )
+            
+            # Save to DB
+            if self.signal_repository and signal_id:
+                try:
+                    self._save_signal_to_db(
+                        symbol=symbol,
+                        signal_data=signal_data,
+                        entry_levels=context['entry_levels'],
+                        signal_price=context['signal_price'],
+                        atr=context['atr'],
+                        timeframe='1h',
+                        telegram_message_id=message_id,
+                        telegram_channel_id=self.channel_id,
+                        signal_id=signal_id
+                    )
+                except Exception as db_error:
+                    self.logger.error(
+                        f"{symbol} sinyal veritabanına kaydedilemedi: {str(db_error)} - "
+                        f"Signal ID: {signal_id}, Message ID: {message_id}",
+                        exc_info=True
+                    )
+
+            # Update Cache
+            self._update_signal_cache(
+                symbol=symbol,
+                has_active_signal=True,
+                signal_id=signal_id,
+                direction=direction,
+                confidence=confidence,
+                timestamp=context['signal_created_at'],
+                source='send'
+            )
+        else:
+            # Message failed
+            error_msg = (
+                f"{symbol} sinyal bildirimi gönderilemedi veya message_id alınamadı - "
+                f"Signal ID: {signal_id if signal_id else 'None'}"
+            )
+            self.logger.error(error_msg)
+            
+            if signal_id:
+                self.logger.warning(
+                    f"⚠️ KRİTİK: {symbol} için sinyal mesajı gönderilmeye çalışıldı ama "
+                    f"message_id alınamadı. Signal ID: {signal_id}. "
+                    f"Eğer mesaj Telegram'da görünüyorsa, bu sinyal veritabanına kaydedilmemiş olabilir."
+                )
+            
+            # Cache update (Critical fallback)
+            self.logger.warning(
+                f"{symbol} için cache güncelleniyor (message_id alınamadı ama aktif sinyal korunmalı) - "
+                f"Signal ID: {signal_id}, Direction: {direction}, Timestamp: {context['signal_created_at']}"
+            )
+            self._update_signal_cache(
+                symbol=symbol,
+                has_active_signal=True,
+                signal_id=signal_id,
+                direction=direction,
+                confidence=confidence,
+                timestamp=context['signal_created_at'],
+                source='send-failed'
+            )
     
     def _send_to_channel(self, message: str, reply_markup: Optional[Any] = None) -> Optional[int]:
         """
