@@ -1,53 +1,53 @@
 """
-SignalRanker: Sinyalleri sıralayan bileşen.
-Güvenilirlik skoru, RSI aşırılık seviyesi ve hacim gücüne göre sinyalleri filtreler ve sıralar.
+SignalRanker: Component that ranks signals.
+Filters and ranks signals based on confidence score, RSI extremity level, and volume strength.
 """
 from typing import List, Dict
 from utils.logger import LoggerManager
 
 
 class SignalRanker:
-    """Sinyalleri sıralayan bileşen."""
+    """Component that ranks signals."""
     
     def __init__(self):
-        """SignalRanker'ı başlatır."""
+        """Initializes SignalRanker."""
         self.logger = LoggerManager().get_logger('SignalRanker')
     
     def rank_signals(self, all_signals: List[Dict], top_count: int = 5) -> List[Dict]:
         """
-        Sinyalleri gelişmiş skorlama sistemine göre sıralar.
-        Confidence + RSI aşırılık puanı + Hacim gücü puanı.
+        Ranks signals according to advanced scoring system.
+        Confidence + RSI extremity score + Volume strength score.
         
         Args:
-            all_signals: Tüm sinyal listesi
-            top_count: Seçilecek top sinyal sayısı
+            all_signals: List of all signals
+            top_count: Number of top signals to select
             
         Returns:
-            Sıralanmış top sinyal listesi
+            Sorted list of top signals
         """
         if not all_signals:
             return []
         
-        # Minimum güvenilirlik threshold (35%)
+        # Minimum confidence threshold (35%)
         MIN_CONFIDENCE = 0.35
         
-        # Sinyalleri filtrele ve skorla
+        # Filter and score signals
         scored_signals = []
         for signal_data in all_signals:
             direction = signal_data['signal']['direction']
             confidence = signal_data['signal']['confidence']
             
-            # Çok düşük güvenilirliği atla
+            # Skip very low confidence
             if confidence < MIN_CONFIDENCE:
                 continue
             
-            # Base skor (mevcut sistem)
+            # Base score (current system)
             if direction == 'NEUTRAL':
                 base_score = confidence * 0.8
             else:
                 base_score = confidence * 1.1
             
-            # Ekstra puanlar hesapla
+            # Calculate extra points
             rsi_bonus = self._calculate_rsi_extremity_bonus(
                 signal_data['signal'], direction
             )
@@ -55,8 +55,8 @@ class SignalRanker:
                 signal_data['signal']
             )
             
-            # Toplam skor (confidence skoru + bonuslar)
-            # Bonuslar 0-1 arası normalize edilmiş değerler olarak eklenir
+            # Total score (confidence score + bonuses)
+            # Bonuses are added as normalized values between 0-1
             total_score = base_score + (rsi_bonus * 0.3) + (volume_bonus * 0.2)
             
             scored_signals.append({
@@ -73,14 +73,14 @@ class SignalRanker:
                 f"total={total_score:.3f}"
             )
         
-        # Skor'a göre sırala
+        # Sort by score
         sorted_signals = sorted(
             scored_signals,
             key=lambda x: x['score'],
             reverse=True
         )
         
-        # Top N'i seç (hem data hem score bilgisiyle)
+        # Select Top N (with both data and score info)
         top_signals = []
         for s in sorted_signals[:top_count]:
             signal_with_score = s['data'].copy()
@@ -93,7 +93,7 @@ class SignalRanker:
             top_signals.append(signal_with_score)
         
         self.logger.info(
-            f"Top {len(top_signals)} sinyal seçildi: " + 
+            f"Top {len(top_signals)} signals selected: " + 
             ", ".join([s['symbol'] for s in top_signals])
         )
         
@@ -103,24 +103,24 @@ class SignalRanker:
         self, signal: Dict, direction: str
     ) -> float:
         """
-        RSI aşırılık seviyesine göre bonus puan hesaplar.
+        Calculates bonus points based on RSI extremity level.
         
         Args:
-            signal: Sinyal dict
-            direction: Sinyal yönü (LONG/SHORT/NEUTRAL)
+            signal: Signal dict
+            direction: Signal direction (LONG/SHORT/NEUTRAL)
             
         Returns:
-            0-1 arası normalize edilmiş bonus puan
+            Normalized bonus score between 0-1
         """
-        # Multi-timeframe sinyallerinde en güçlü timeframe'i kullan
-        # veya 4h timeframe'ini önceliklendir
+        # Use strongest timeframe in multi-timeframe signals
+        # or prioritize 4h timeframe
         timeframe_signals = signal.get('timeframe_signals', {})
         
         # DEBUG: Type check
         if not isinstance(timeframe_signals, dict):
             self.logger.error(f"timeframe_signals is NOT a dict! Type: {type(timeframe_signals)}, Value: {timeframe_signals}")
         
-        # Öncelik: 4h > 1d > 1h
+        # Priority: 4h > 1d > 1h
         preferred_tfs = ['4h', '1d', '1h']
         rsi_value = None
         
@@ -132,57 +132,57 @@ class SignalRanker:
                     rsi_data = indicators['rsi']
                     if isinstance(rsi_data, dict) and 'value' in rsi_data:
                         rsi_value = rsi_data['value']
-                        self.logger.debug(f"RSI bonus hesaplama: tf={tf}, rsi_value={rsi_value:.2f}, direction={direction}")
+                        self.logger.debug(f"RSI bonus calculation: tf={tf}, rsi_value={rsi_value:.2f}, direction={direction}")
                         break
         
         if rsi_value is None:
-            self.logger.debug(f"RSI bonus hesaplama: RSI değeri bulunamadı (timeframe_signals={list(timeframe_signals.keys())})")
+            self.logger.debug(f"RSI bonus calculation: RSI value not found (timeframe_signals={list(timeframe_signals.keys())})")
             return 0.0
         
         bonus = 0.0
         
-        # LONG sinyali için: RSI aşırı düşük seviyelerde bonus
+        # For LONG signal: Bonus at extremely low RSI levels
         if direction == 'LONG':
             if rsi_value <= 20:
-                # Çok aşırı oversold - maksimum bonus
+                # Very extreme oversold - maximum bonus
                 bonus = 1.0
             elif rsi_value <= 25:
-                # Aşırı oversold - yüksek bonus
+                # Extreme oversold - high bonus
                 bonus = 0.7
             elif rsi_value <= 30:
-                # Oversold - orta bonus
+                # Oversold - medium bonus
                 bonus = 0.4
             elif rsi_value <= 35:
-                # Hafif oversold - düşük bonus
+                # Slightly oversold - low bonus
                 bonus = 0.15
-            # LONG sinyali + yüksek RSI = mantıksal çelişki (bonus yok)
+            # LONG signal + high RSI = logical contradiction (no bonus)
         
-        # SHORT sinyali için: RSI aşırı yüksek seviyelerde bonus
+        # For SHORT signal: Bonus at extremely high RSI levels
         elif direction == 'SHORT':
             if rsi_value >= 80:
-                # Çok aşırı overbought - maksimum bonus
+                # Very extreme overbought - maximum bonus
                 bonus = 1.0
             elif rsi_value >= 75:
-                # Aşırı overbought - yüksek bonus
+                # Extreme overbought - high bonus
                 bonus = 0.7
             elif rsi_value >= 70:
-                # Overbought - orta bonus
+                # Overbought - medium bonus
                 bonus = 0.4
             elif rsi_value >= 65:
-                # Hafif overbought - düşük bonus
+                # Slightly overbought - low bonus
                 bonus = 0.15
-            # SHORT sinyali + düşük RSI = mantıksal çelişki (bonus yok)
+            # SHORT signal + low RSI = logical contradiction (no bonus)
         
-        # NEUTRAL sinyali için: Her iki yönde aşırı RSI değerlerinde bonus
+        # For NEUTRAL signal: Bonus at extreme RSI levels in both directions
         elif direction == 'NEUTRAL':
-            # Yüksek RSI (overbought) - NEUTRAL'da da aşırılık işareti
+            # High RSI (overbought) - sign of extremity in NEUTRAL too
             if rsi_value >= 75:
                 bonus = 0.5
             elif rsi_value >= 70:
                 bonus = 0.3
             elif rsi_value >= 65:
                 bonus = 0.15
-            # Düşük RSI (oversold) - NEUTRAL'da da aşırılık işareti
+            # Low RSI (oversold) - sign of extremity in NEUTRAL too
             elif rsi_value <= 25:
                 bonus = 0.5
             elif rsi_value <= 30:
@@ -194,18 +194,18 @@ class SignalRanker:
     
     def _calculate_volume_strength_bonus(self, signal: Dict) -> float:
         """
-        Hacim gücüne göre bonus puan hesaplar.
+        Calculates bonus points based on volume strength.
         
         Args:
-            signal: Sinyal dict
+            signal: Signal dict
             
         Returns:
-            0-1 arası normalize edilmiş bonus puan
+            Normalized bonus score between 0-1
         """
-        # Multi-timeframe sinyallerinde en güçlü timeframe'i kullan
+        # Use strongest timeframe in multi-timeframe signals
         timeframe_signals = signal.get('timeframe_signals', {})
         
-        # Öncelik: 4h > 1d > 1h
+        # Priority: 4h > 1d > 1h
         preferred_tfs = ['4h', '1d', '1h']
         volume_data = None
         
@@ -214,10 +214,10 @@ class SignalRanker:
                 tf_signal = timeframe_signals[tf]
                 volume = tf_signal.get('volume')
                 
-                # Debug: Volume yapısını kontrol et
+                # Debug: Check volume structure
                 if volume:
                     self.logger.debug(
-                        f"Volume bonus hesaplama: tf={tf}, "
+                        f"Volume bonus calculation: tf={tf}, "
                         f"volume_type={type(volume).__name__}, "
                         f"volume_keys={list(volume.keys()) if isinstance(volume, dict) else 'N/A'}"
                     )
@@ -227,33 +227,33 @@ class SignalRanker:
                     break
         
         if not volume_data:
-            self.logger.debug("Volume bonus hesaplama: volume_data bulunamadı")
+            self.logger.debug("Volume bonus calculation: volume_data not found")
             return 0.0
         
         relative_volume = volume_data.get('relative', 0)
         
-        # Debug: Relative volume değerini logla
+        # Debug: Log relative volume value
         if relative_volume > 0:
             self.logger.debug(
-                f"Volume bonus hesaplama: relative_volume={relative_volume:.3f}"
+                f"Volume bonus calculation: relative_volume={relative_volume:.3f}"
             )
         
-        # Hacim spike seviyelerine göre bonus
+        # Bonus based on volume spike levels
         if relative_volume >= 3.0:
-            # Çok güçlü hacim spike (3x+) - maksimum bonus
+            # Very strong volume spike (3x+) - maximum bonus
             return 1.0
         elif relative_volume >= 2.5:
-            # Güçlü hacim spike (2.5x+) - yüksek bonus
+            # Strong volume spike (2.5x+) - high bonus
             return 0.8
         elif relative_volume >= 2.0:
-            # Hacim spike (2x+) - orta-yüksek bonus
+            # Volume spike (2x+) - medium-high bonus
             return 0.6
         elif relative_volume >= 1.5:
-            # Yüksek hacim (1.5x+) - orta bonus
+            # High volume (1.5x+) - medium bonus
             return 0.4
         elif relative_volume >= 1.2:
-            # Artan hacim (1.2x+) - düşük bonus
+            # Increasing volume (1.2x+) - low bonus
             return 0.2
         else:
-            # Normal hacim
+            # Normal volume
             return 0.0

@@ -1,5 +1,5 @@
 """
-PriceChecker: Fiyat kontrolü ve TP/SL hit detection.
+PriceChecker: Price check and TP/SL hit detection.
 Target price check, stop-loss check helpers.
 """
 from typing import Dict, Optional, Tuple
@@ -7,7 +7,7 @@ from utils.logger import LoggerManager
 
 
 class PriceChecker:
-    """Fiyat kontrolü helper sınıfı."""
+    """Price check helper class."""
     
     def __init__(self):
         self.logger = LoggerManager().get_logger('PriceChecker')
@@ -20,22 +20,22 @@ class PriceChecker:
         tolerance: float = 0.001
     ) -> bool:
         """
-        TP hit kontrolü yapar.
+        Checks for TP hit.
         
         Args:
-            current_price: Güncel fiyat
-            tp_price: TP fiyatı
+            current_price: Current price
+            tp_price: TP price
             direction: LONG/SHORT
-            tolerance: Tolerans (0.001 = %0.1)
+            tolerance: Tolerance (0.001 = 0.1%)
             
         Returns:
-            True ise TP hit olmuş
+            True if TP hit
         """
         if direction == 'LONG':
-            # LONG: Fiyat TP'ye ulaşmalı veya geçmeli
+            # LONG: Price must reach or exceed TP
             return current_price >= tp_price * (1 - tolerance)
         else:  # SHORT
-            # SHORT: Fiyat TP'ye ulaşmalı veya geçmeli
+            # SHORT: Price must reach or pass TP
             return current_price <= tp_price * (1 + tolerance)
     
     def check_sl_hit(
@@ -46,22 +46,22 @@ class PriceChecker:
         tolerance: float = 0.001
     ) -> bool:
         """
-        SL hit kontrolü yapar.
+        Checks for SL hit.
         
         Args:
-            current_price: Güncel fiyat
-            sl_price: SL fiyatı
+            current_price: Current price
+            sl_price: SL price
             direction: LONG/SHORT
-            tolerance: Tolerans
+            tolerance: Tolerance
             
         Returns:
-            True ise SL hit olmuş
+            True if SL hit
         """
         if direction == 'LONG':
-            # LONG: Fiyat SL'ye ulaşmalı veya altına düşmeli
+            # LONG: Price must reach or drop below SL
             return current_price <= sl_price * (1 + tolerance)
         else:  # SHORT
-            # SHORT: Fiyat SL'ye ulaşmalı veya üstüne çıkmalı
+            # SHORT: Price must reach or rise above SL
             return current_price >= sl_price * (1 - tolerance)
     
     def calculate_distance_to_level(
@@ -70,11 +70,11 @@ class PriceChecker:
         target_price: float
     ) -> Tuple[float, float]:
         """
-        Hedefe uzaklık hesaplar.
+        Calculates distance to target.
         
         Args:
-            current_price: Güncel fiyat
-            target_price: Hedef fiyat
+            current_price: Current price
+            target_price: Target price
             
         Returns:
             (absolute_distance, percent_distance)
@@ -91,15 +91,15 @@ class PriceChecker:
         direction: str
     ) -> Optional[Tuple[str, float]]:
         """
-        En yakın seviyeyi bulur.
+        Finds the nearest level.
         
         Args:
-            current_price: Güncel fiyat
-            levels: Seviyeler dict (örn: {'TP1': 100, 'TP2': 110})
+            current_price: Current price
+            levels: Levels dict (e.g., {'TP1': 100, 'TP2': 110})
             direction: LONG/SHORT
             
         Returns:
-            (level_name, level_price) veya None
+            (level_name, level_price) or None
         """
         if not levels:
             return None

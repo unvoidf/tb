@@ -905,16 +905,16 @@ class SignalTracker:
     
     def _should_finalize_signal(self, signal: Dict) -> bool:
         """
-        Sinyal kapatılmalı mı kontrol eder.
+        Checks if signal should be finalized.
         
-        Sadece 72 saat kontrolü yapar. TP/SL hit durumları finalize sebebi değildir,
-        çünkü kullanıcı manuel TP/SL yönetimi yapıyor olabilir.
+        Only checks for 72 hours. TP/SL hit statuses are not finalization reasons,
+        because user might be managing TP/SL manually.
         
         Args:
-            signal: Sinyal dict
+            signal: Signal dict
             
         Returns:
-            True ise kapatılmalı (sadece 72 saat geçtiyse)
+            True if should be finalized (only if 72 hours passed)
         """
         # Only check 72 hours
         # TP/SL hit statuses are not finalization reasons (user might manage manually)

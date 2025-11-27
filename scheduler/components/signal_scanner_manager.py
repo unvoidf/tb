@@ -83,7 +83,7 @@ class SignalScannerManager:
         
         # Log startup configuration
         self.logger.info(
-            "SignalScannerManager başlatıldı - "
+            "SignalScannerManager started - "
             "threshold=%s, ranging_min_sl=%s%%",
             confidence_threshold,
             ranging_min_sl_percent,
@@ -106,7 +106,7 @@ class SignalScannerManager:
         Scans Top Futures coins (Hybrid: Majors + Radar).
         """
         try:
-            self.logger.info("Sinyal tarama başlatıldı (Hibrit Mod)")
+            self.logger.info("Signal scanning started (Hybrid Mode)")
             
             # Market Pulse Report (Market Pulse Log) - At the beginning of scan
             self._log_market_pulse()
@@ -115,7 +115,7 @@ class SignalScannerManager:
             symbols = self.coin_filter.get_top_futures_coins(50)
             
             if not symbols:
-                self.logger.warning("Futures coin listesi alınamadı")
+                self.logger.warning("Futures coin list could not be retrieved")
                 return
             
             # Statistics
@@ -136,14 +136,14 @@ class SignalScannerManager:
                     stats['TOTAL_SCANNED'] += 1
                     self._check_symbol_signal(symbol, stats)
                 except Exception as e:
-                    self.logger.error(f"{symbol} sinyal kontrolü hatası: {str(e)}", exc_info=True)
+                    self.logger.error(f"{symbol} signal check error: {str(e)}", exc_info=True)
             
             # Scan Summary Report
             self._log_scan_summary(stats)
-            self.logger.info("Sinyal tarama tamamlandı")
+            self.logger.info("Signal scanning completed")
             
         except Exception as e:
-            self.logger.error(f"Sinyal tarama hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Signal scanning error: {str(e)}", exc_info=True)
     
     def _check_symbol_signal(self, symbol: str, stats: Dict = None) -> None:
         """
@@ -158,7 +158,7 @@ class SignalScannerManager:
             signal_data, reason = self._analyze_symbol(symbol, return_reason=True)
             
             if not signal_data:
-                self.logger.debug(f"{symbol} için sinyal verisi yok (Reason: {reason})")
+                self.logger.debug(f"No signal data for {symbol} (Reason: {reason})")
                 
                 if stats:
                     if reason == 'FILTER_R_R':
@@ -204,7 +204,7 @@ class SignalScannerManager:
             self._send_signal_notification(symbol, signal_data)
             
         except Exception as e:
-            self.logger.error(f"{symbol} sinyal kontrolü hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"{symbol} signal check error: {str(e)}", exc_info=True)
 
     def _calculate_signal_score(self, symbol: str, signal_data: Dict, stats: Dict = None) -> Tuple[float, bool]:
         """
@@ -229,11 +229,11 @@ class SignalScannerManager:
             
             if total_score > 1.0:
                 self.logger.warning(
-                    f"{symbol} total_score {total_score:.3f} > 1.0, confidence {capped_confidence:.3f} olarak cap'lendi"
+                    f"{symbol} total_score {total_score:.3f} > 1.0, capped at {capped_confidence:.3f}"
                 )
             
             self.logger.debug(
-                f"{symbol} sinyal: direction={overall_direction}, "
+                f"{symbol} signal: direction={overall_direction}, "
                 f"base_confidence={overall_confidence:.3f}, "
                 f"rsi_bonus={ranking_info.get('rsi_bonus', 0.0):.3f}, "
                 f"volume_bonus={ranking_info.get('volume_bonus', 0.0):.3f}, "
@@ -249,7 +249,7 @@ class SignalScannerManager:
                 return total_score, True
         else:
             # Could not be ranked
-            self.logger.debug(f"{symbol} sinyal: direction={overall_direction}, confidence={overall_confidence:.3f} (rank edilemedi)")
+            self.logger.debug(f"{symbol} signal: direction={overall_direction}, confidence={overall_confidence:.3f} (could not be ranked)")
             min_threshold = self._get_direction_threshold(overall_direction)
             
             if overall_confidence < min_threshold:
@@ -286,7 +286,7 @@ class SignalScannerManager:
         
         # NEUTRAL check
         if overall_direction == 'NEUTRAL':
-            self.logger.debug(f"{symbol} sinyali NEUTRAL (score={total_score:.3f}); kanal bildirimi atlandı")
+            self.logger.debug(f"{symbol} signal NEUTRAL (score={total_score:.3f}); channel notification skipped")
             if stats: stats['NO_SIGNAL'] += 1
             return False
         
@@ -296,12 +296,12 @@ class SignalScannerManager:
         adx_strength = market_context.get('adx_strength', 0)
         
         if regime == 'trending_down' and overall_direction == 'LONG':
-            self.logger.info(f"{symbol} LONG sinyali reddedildi: Market regime 'trending_down' (ADX={adx_strength:.1f}). Trend-yön uyumsuzluğu.")
+            self.logger.info(f"{symbol} LONG signal rejected: Market regime 'trending_down' (ADX={adx_strength:.1f}). Trend-Direction Mismatch.")
             if stats: stats['REJECTED_TREND'] += 1
             return False
         
         if regime == 'trending_up' and overall_direction == 'SHORT':
-            self.logger.info(f"{symbol} SHORT sinyali reddedildi: Market regime 'trending_up' (ADX={adx_strength:.1f}). Trend-yön uyumsuzluğu.")
+            self.logger.info(f"{symbol} SHORT signal rejected: Market regime 'trending_up' (ADX={adx_strength:.1f}). Trend-Direction Mismatch.")
             if stats: stats['REJECTED_TREND'] += 1
             return False
             
@@ -309,7 +309,7 @@ class SignalScannerManager:
         if regime == 'ranging' or adx_strength < 25:
             ranging_threshold = 0.8
             if total_score < ranging_threshold:
-                self.logger.info(f"{symbol} ranging/zayıf trend (ADX={adx_strength:.1f}), score={total_score:.3f} < {ranging_threshold}, atlandı")
+                self.logger.info(f"{symbol} ranging/weak trend (ADX={adx_strength:.1f}), score={total_score:.3f} < {ranging_threshold}, skipped")
                 if stats: stats['REJECTED_CONFIDENCE'] += 1
                 return False
                 
@@ -332,7 +332,7 @@ class SignalScannerManager:
         # NEUTRAL direction signals are always rejected
         if direction == 'NEUTRAL':
             self.logger.debug(
-                f"{symbol} NEUTRAL yönlü sinyal gönderilmiyor"
+                f"{symbol} NEUTRAL direction signal not sent"
             )
             # Save rejected signal
             if self.signal_repository:
@@ -358,11 +358,11 @@ class SignalScannerManager:
             cache_entry = self._load_cache_entry_from_db(symbol)
             if cache_entry is None:
                 # No active signal in DB either
-                self.logger.debug("%s için aktif sinyal yok, bildirim gönderilecek", symbol)
+                self.logger.debug("No active signal for %s, notification will be sent", symbol)
                 return True
             # Active signal found in DB
             self.logger.debug(
-                "%s için aktif sinyal bulundu (DB'den): signal_id=%s",
+                "Active signal found for %s (from DB): signal_id=%s",
                 symbol,
                 cache_entry.get('signal_id')
             )
@@ -385,7 +385,7 @@ class SignalScannerManager:
         # Is there active signal in cache?
         if cache_entry.get('has_active_signal', False):
             self.logger.debug(
-                "%s için aktif sinyal var (cache'den), bildirim gönderilmeyecek",
+                "Active signal exists for %s (from cache), notification will not be sent",
                 symbol
             )
             # Save rejected signal
@@ -456,7 +456,7 @@ class SignalScannerManager:
             self._dispatch_signal(symbol, signal_data, context)
             
         except Exception as e:
-            self.logger.error(f"{symbol} bildirim gönderme hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"{symbol} notification sending error: {str(e)}", exc_info=True)
             
             # Cache update must be done even in exception case (active signal must be preserved)
             try:
@@ -466,7 +466,7 @@ class SignalScannerManager:
                 
                 if direction:
                     self.logger.warning(
-                        f"{symbol} için cache güncelleniyor (exception sonrası aktif sinyal korunmalı) - "
+                        f"Updating cache for {symbol} (active signal must be preserved after exception) - "
                         f"Direction: {direction}, Timestamp: {signal_created_at}"
                     )
                     self._update_signal_cache(
@@ -479,7 +479,7 @@ class SignalScannerManager:
                     )
             except Exception as cache_error:
                 self.logger.error(
-                    f"{symbol} cache güncelleme hatası (exception durumunda): {str(cache_error)}",
+                    f"{symbol} cache update error (in exception case): {str(cache_error)}",
                     exc_info=True
                 )
 
@@ -489,7 +489,7 @@ class SignalScannerManager:
             # Price at signal generation time
             current_price = self.market_data.get_latest_price(symbol)
             if not current_price:
-                self.logger.warning(f"{symbol} güncel fiyat alınamadı")
+                self.logger.warning(f"Could not get current price for {symbol}")
                 return None
             
             signal_price = current_price
@@ -505,7 +505,7 @@ class SignalScannerManager:
                     indicators = TechnicalIndicatorCalculator()
                     atr = indicators.calculate_atr(df, period=14)
             except Exception as e:
-                self.logger.warning(f"{symbol} OHLCV/ATR hesaplama hatası: {str(e)}")
+                self.logger.warning(f"{symbol} OHLCV/ATR calculation error: {str(e)}")
             
             # Calculate entry levels
             entry_levels = self.entry_calc.calculate_entry_levels(
@@ -539,7 +539,7 @@ class SignalScannerManager:
                 'signal_id': signal_id
             }
         except Exception as e:
-            self.logger.error(f"{symbol} context hazırlama hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"{symbol} context preparation error: {str(e)}", exc_info=True)
             return None
 
     def _analyze_liquidation_risk(self, symbol: str, signal_data: Dict, context: Dict) -> None:
@@ -581,12 +581,12 @@ class SignalScannerManager:
                     signal_data['liquidation_risk_percentage'] = liquidation_risk_percentage
                 
                 self.logger.info(
-                    f"Bu sinyal %{liquidation_risk_percentage:.2f} likidite riski taşımaktadır. "
+                    f"This signal carries %{liquidation_risk_percentage:.2f} liquidation risk. "
                     f"(Signal ID: {signal_id}, Symbol: {symbol})"
                 )
         except Exception as liq_error:
             self.logger.warning(
-                f"Liquidation risk analizi yapılamadı: {str(liq_error)} - "
+                f"Liquidation risk analysis failed: {str(liq_error)} - "
                 f"Signal ID: {context.get('signal_id')}, Symbol: {symbol}",
                 exc_info=True
             )
@@ -620,7 +620,7 @@ class SignalScannerManager:
         
         if message_id:
             self.logger.info(
-                f"{symbol} sinyal bildirimi gönderildi (dir={direction}, score={confidence:.3f}) - "
+                f"{symbol} signal notification sent (dir={direction}, score={confidence:.3f}) - "
                 f"Message ID: {message_id}, Signal ID: {signal_id}"
             )
             
@@ -640,7 +640,7 @@ class SignalScannerManager:
                     )
                 except Exception as db_error:
                     self.logger.error(
-                        f"{symbol} sinyal veritabanına kaydedilemedi: {str(db_error)} - "
+                        f"{symbol} signal could not be saved to database: {str(db_error)} - "
                         f"Signal ID: {signal_id}, Message ID: {message_id}",
                         exc_info=True
                     )
@@ -658,21 +658,21 @@ class SignalScannerManager:
         else:
             # Message failed
             error_msg = (
-                f"{symbol} sinyal bildirimi gönderilemedi veya message_id alınamadı - "
+                f"{symbol} signal notification could not be sent or message_id could not be retrieved - "
                 f"Signal ID: {signal_id if signal_id else 'None'}"
             )
             self.logger.error(error_msg)
             
             if signal_id:
                 self.logger.warning(
-                    f"⚠️ KRİTİK: {symbol} için sinyal mesajı gönderilmeye çalışıldı ama "
-                    f"message_id alınamadı. Signal ID: {signal_id}. "
-                    f"Eğer mesaj Telegram'da görünüyorsa, bu sinyal veritabanına kaydedilmemiş olabilir."
+                    f"⚠️ CRITICAL: Tried to send signal message for {symbol} but "
+                    f"message_id could not be retrieved. Signal ID: {signal_id}. "
+                    f"If message appears in Telegram, this signal might not be saved to database."
                 )
             
             # Cache update (Critical fallback)
             self.logger.warning(
-                f"{symbol} için cache güncelleniyor (message_id alınamadı ama aktif sinyal korunmalı) - "
+                f"Updating cache for {symbol} (message_id missing but active signal must be preserved) - "
                 f"Signal ID: {signal_id}, Direction: {direction}, Timestamp: {context['signal_created_at']}"
             )
             self._update_signal_cache(
@@ -706,15 +706,15 @@ class SignalScannerManager:
             )
             
             if message_id:
-                self.logger.debug(f"Kanal mesajı başarıyla gönderildi - Message ID: {message_id}")
+                self.logger.debug(f"Channel message sent successfully - Message ID: {message_id}")
             else:
-                self.logger.warning("Kanal mesajı gönderildi ama message_id alınamadı")
+                self.logger.warning("Channel message sent but message_id could not be retrieved")
             
             return message_id
             
         except Exception as e:
             self.logger.error(
-                f"Kanal mesajı gönderme hatası: {str(e)}", 
+                f"Channel message sending error: {str(e)}", 
                 exc_info=True
             )
             return None
@@ -1033,7 +1033,7 @@ class SignalScannerManager:
     def _warmup_cache_from_db(self) -> None:
         """Populates active signal cache from database on startup."""
         if not self.signal_repository:
-            self.logger.debug("Aktif sinyal cache warmup atlandı: SignalRepository tanımlı değil")
+            self.logger.debug("Active signal cache warmup skipped: SignalRepository not defined")
             return
 
         # Load active signals from last 24 hours
@@ -1042,7 +1042,7 @@ class SignalScannerManager:
         summaries = self.signal_repository.get_recent_signal_summaries(lookback_hours)
         if not summaries:
             self.logger.debug(
-                "Aktif sinyal cache warmup verisi bulunamadı (lookback=%dh)",
+                "Active signal cache warmup data not found (lookback=%dh)",
                 lookback_hours
             )
             return
@@ -1060,7 +1060,7 @@ class SignalScannerManager:
             )
 
         self.logger.info(
-            "Aktif sinyal cache warmup tamamlandı: %d sembol yüklendi (lookback=%dh)",
+            "Active signal cache warmup completed: %d symbols loaded (lookback=%dh)",
             len(summaries),
             lookback_hours
         )
@@ -1117,10 +1117,10 @@ class SignalScannerManager:
         
         for symbol in symbols_to_remove:
             del self.signal_cache[symbol]
-            self.logger.debug(f"{symbol} cache'den temizlendi (aktif sinyal yok)")
+            self.logger.debug(f"{symbol} cleared from cache (no active signal)")
         
         if symbols_to_remove:
-            self.logger.info(f"{len(symbols_to_remove)} pasif sinyal cache'den temizlendi")
+            self.logger.info(f"{len(symbols_to_remove)} passive signals cleared from cache")
     
     def _log_rejection_scorecard(
         self,
@@ -1180,32 +1180,32 @@ class SignalScannerManager:
     def _get_indicator_status(self, signal: str, direction: str, value: float) -> str:
         """Format indicator status."""
         if signal == direction:
-            return f"✅ Uyumlu ({signal})"
+            return f"✅ Aligned ({signal})"
         elif signal == 'NEUTRAL':
-            return f"⚪ Nötr"
+            return f"⚪ Neutral"
         else:
-            return f"❌ Ters ({signal})"
+            return f"❌ Opposite ({signal})"
     
     def _get_trend_status(self, signal: str, direction: str, adx_value: float) -> str:
         """Format trend status."""
         if signal == direction:
             if adx_value > 25:
-                return f"✅ Güçlü Trend ({signal})"
+                return f"✅ Strong Trend ({signal})"
             else:
-                return f"⚠️ Zayıf Trend ({signal})"
+                return f"⚠️ Weak Trend ({signal})"
         elif signal == 'NEUTRAL':
-            return f"⚪ Nötr"
+            return f"⚪ Neutral"
         else:
-            return f"❌ Ters Trend ({signal})"
+            return f"❌ Opposite Trend ({signal})"
     
     def _get_volume_status(self, relative: float, signal: str) -> str:
         """Format volume status."""
         if relative >= 1.5:
-            return f"✅ Yüksek (x{relative:.2f})"
+            return f"✅ High (x{relative:.2f})"
         elif relative >= 1.0:
             return f"⚪ Normal (x{relative:.2f})"
         else:
-            return f"❌ Düşük (x{relative:.2f})"
+            return f"❌ Low (x{relative:.2f})"
     
     def _log_market_pulse(self) -> None:
         """
@@ -1240,31 +1240,31 @@ class SignalScannerManager:
                         
                         # Determine BTC status
                         if btc_change_24h < -3.0 or btc_rsi < 30:
-                            btc_status = "⚠️ Çöküş Riski"
+                            btc_status = "⚠️ Crash Risk"
                         elif btc_change_24h < -1.0:
-                            btc_status = "⚠️ Düşüş"
+                            btc_status = "⚠️ Bearish"
                         elif btc_change_24h > 3.0:
-                            btc_status = "✅ Güçlü Yükseliş"
+                            btc_status = "✅ Strong Bullish"
                         elif btc_change_24h > 1.0:
-                            btc_status = "✅ Yükseliş"
+                            btc_status = "✅ Bullish"
                         else:
-                            btc_status = "⚪ Güvenli"
+                            btc_status = "⚪ Safe"
             except Exception as e:
-                self.logger.debug(f"BTC durumu kontrolü hatası: {str(e)}")
+                self.logger.debug(f"BTC status check error: {str(e)}")
             
             # Time info
             current_time = datetime.now().strftime("%H:%M")
             
             # Log message
             log_lines = [
-                f"🌍 PİYASA NABZI ({current_time}):",
-                f"   • BTC Durumu: {btc_status} (24h: {btc_change_24h:+.2f}%, RSI: {btc_rsi:.1f})"
+                f"🌍 MARKET PULSE ({current_time}):",
+                f"   • BTC Status: {btc_status} (24h: {btc_change_24h:+.2f}%, RSI: {btc_rsi:.1f})"
             ]
             
             self.logger.info("\n".join(log_lines))
             
         except Exception as e:
-            self.logger.debug(f"Piyasa nabzı raporu hatası: {str(e)}")
+            self.logger.debug(f"Market pulse report error: {str(e)}")
 
     def _log_scan_summary(self, stats: Dict) -> None:
         """
@@ -1282,35 +1282,35 @@ class SignalScannerManager:
             no_signal = stats.get('NO_SIGNAL', 0)
             
             log_lines = [
-                f"📊 TARAMA ÖZETİ ({total} Coin)",
+                f"📊 SCAN SUMMARY ({total} Coins)",
                 f"----------------------------------------",
-                f"✅ Sinyal Üretildi: {generated}",
+                f"✅ Signals Generated: {generated}",
                 f"",
-                f"❌ Reddedilme Nedenleri:",
+                f"❌ Rejection Reasons:",
                 f"  • Risk/Reward: {rejected_rr}",
-                f"  • Trend Uyumsuzluğu: {rejected_trend}",
-                f"  • Confidence Yetersiz: {rejected_conf}",
-                f"  • BTC Crash Filtresi: {rejected_btc}",
-                f"  • Yüksek Volatilite: {rejected_volatility}",
-                f"  • Düşük ATR (<%2): {rejected_low_atr}",
-                f"  • Sinyal Yok: {no_signal}",
+                f"  • Trend Mismatch: {rejected_trend}",
+                f"  • Insufficient Confidence: {rejected_conf}",
+                f"  • BTC Crash Filter: {rejected_btc}",
+                f"  • High Volatility: {rejected_volatility}",
+                f"  • Low ATR (<%2): {rejected_low_atr}",
+                f"  • No Signal: {no_signal}",
             ]
             
             log_lines.append(f"----------------------------------------")
             
             # Result comment
             if generated > 0:
-                result = "Fırsat bulundu!"
+                result = "Opportunity found!"
             elif rejected_btc > 0:
-                result = "BTC kaynaklı risk, işlem açılmadı."
+                result = "BTC risk detected, no trade."
             elif rejected_rr > 0:
-                result = "Fırsatlar var ama R/R kurtarmıyor."
+                result = "Opportunities exist but R/R is low."
             else:
-                result = "Piyasa stabil/yatay, fırsat bekleniyor."
+                result = "Market stable/ranging, waiting for opportunities."
                 
-            log_lines.append(f"Sonuç: {result}")
+            log_lines.append(f"Result: {result}")
             
             self.logger.info("\n".join(log_lines))
             
         except Exception as e:
-            self.logger.error(f"Tarama özeti raporu hatası: {str(e)}")
+            self.logger.error(f"Scan summary report error: {str(e)}")

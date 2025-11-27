@@ -1,6 +1,6 @@
 """
-SignalScannerScheduler: Sinyal tarama scheduler'ı.
-Her 5 dakikada bir SignalScannerManager'ı tetikler.
+SignalScannerScheduler: Signal scanning scheduler.
+Triggers SignalScannerManager every 5 minutes.
 """
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -10,11 +10,11 @@ from scheduler.components.signal_scanner_manager import SignalScannerManager
 
 
 class SignalScannerScheduler:
-    """Sinyal tarama scheduler'ı."""
+    """Signal scanning scheduler."""
     
     def __init__(self, scanner_manager: SignalScannerManager):
         """
-        SignalScannerScheduler'ı başlatır.
+        Initializes SignalScannerScheduler.
         
         Args:
             scanner_manager: Signal scanner manager instance
@@ -25,73 +25,73 @@ class SignalScannerScheduler:
         self.is_running = False
     
     def start(self) -> None:
-        """Scheduler'ı başlatır."""
+        """Starts the scheduler."""
         try:
             if self.is_running:
-                self.logger.warning("Signal scanner scheduler zaten çalışıyor")
+                self.logger.warning("Signal scanner scheduler is already running")
                 return
             
-            # Her 5 dakikada bir sinyal tarama
+            # Scan signals every 5 minutes
             self.scheduler.add_job(
                 self._scan_signals,
                 trigger=IntervalTrigger(minutes=5),
                 id='signal_scanner_scan',
-                name='Sinyal Tarama',
+                name='Signal Scanning',
                 replace_existing=True
             )
             
-            # Her saat başı cache temizleme
+            # Cleanup cache every hour
             self.scheduler.add_job(
                 self._cleanup_cache,
                 trigger=IntervalTrigger(hours=1),
                 id='signal_scanner_cleanup',
-                name='Cache Temizleme',
+                name='Cache Cleanup',
                 replace_existing=True
             )
             
             self.scheduler.start()
             self.is_running = True
             
-            self.logger.info("Signal scanner scheduler başlatıldı - Her 5 dakikada tarama")
+            self.logger.info("Signal scanner scheduler started - Scanning every 5 minutes")
             
         except Exception as e:
-            self.logger.error(f"Signal scanner scheduler başlatma hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Signal scanner scheduler startup error: {str(e)}", exc_info=True)
             raise
     
     def stop(self) -> None:
-        """Scheduler'ı durdurur."""
+        """Stops the scheduler."""
         try:
             if not self.is_running:
-                self.logger.warning("Signal scanner scheduler zaten durmuş")
+                self.logger.warning("Signal scanner scheduler is already stopped")
                 return
             
             if self.scheduler.running:
                 self.scheduler.shutdown()
             
             self.is_running = False
-            self.logger.info("Signal scanner scheduler durduruldu")
+            self.logger.info("Signal scanner scheduler stopped")
             
         except Exception as e:
-            self.logger.error(f"Signal scanner scheduler durdurma hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Signal scanner scheduler shutdown error: {str(e)}", exc_info=True)
     
     def _scan_signals(self) -> None:
-        """Sinyal tarama job'ını çalıştırır."""
+        """Runs the signal scanning job."""
         try:
-            self.logger.debug("Sinyal tarama job başlatıldı")
+            self.logger.debug("Signal scanning job started")
             self.scanner_manager.scan_for_signals()
         except Exception as e:
-            self.logger.error(f"Sinyal tarama job hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Signal scanning job error: {str(e)}", exc_info=True)
     
     def _cleanup_cache(self) -> None:
-        """Cache temizleme job'ını çalıştırır."""
+        """Runs the cache cleanup job."""
         try:
-            self.logger.debug("Cache temizleme job başlatıldı")
+            self.logger.debug("Cache cleanup job started")
             self.scanner_manager.cleanup_old_cache()
         except Exception as e:
-            self.logger.error(f"Cache temizleme job hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Cache cleanup job error: {str(e)}", exc_info=True)
     
     def get_status(self) -> dict:
-        """Scheduler durumunu döndürür."""
+        """Returns scheduler status."""
         cache_stats = self.scanner_manager.get_cache_stats()
         
         return {
@@ -103,9 +103,9 @@ class SignalScannerScheduler:
         }
     
     def force_scan(self) -> None:
-        """Manuel olarak sinyal tarama tetikler."""
+        """Manually triggers signal scanning."""
         try:
-            self.logger.info("Manuel sinyal tarama tetiklendi")
+            self.logger.info("Manual signal scanning triggered")
             self.scanner_manager.scan_for_signals()
         except Exception as e:
-            self.logger.error(f"Manuel sinyal tarama hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Manual signal scanning error: {str(e)}", exc_info=True)
