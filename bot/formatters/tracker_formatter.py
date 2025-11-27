@@ -202,6 +202,7 @@ class TrackerFormatter(BaseFormatter):
             ts_str = generated_at.strftime('%Y-%m-%d %H:%M UTC')
         
         def fmt(price: float) -> str:
+            """Formats price with appropriate decimal places based on value."""
             if price is None:
                 return "-"
             # 1$ and above: 2 decimals, thousand separator; below 1$: 6 decimals

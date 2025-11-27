@@ -26,7 +26,7 @@ def sample_ohlcv_data():
         prices.append(current_price)
     
     # OHLCV verisi oluştur
-    data = []
+    ohlcv_records = []
     for i, (date, price) in enumerate(zip(dates, prices)):
         # High/Low/Close için küçük varyasyonlar
         high = price * (1 + np.random.uniform(0, 0.02))
@@ -34,7 +34,7 @@ def sample_ohlcv_data():
         close = price * (1 + np.random.uniform(-0.01, 0.01))
         volume = np.random.uniform(1000, 10000)
         
-        data.append({
+        ohlcv_records.append({
             'timestamp': date,
             'open': price,
             'high': high,
@@ -43,7 +43,7 @@ def sample_ohlcv_data():
             'volume': volume
         })
     
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(ohlcv_records)
     df.set_index('timestamp', inplace=True)
     return df
 
@@ -129,12 +129,14 @@ def sample_config():
 def mock_telegram_update():
     """Mock Telegram update fixture'ı."""
     class MockUser:
+        """Mock Telegram user for testing."""
         def __init__(self):
             self.id = 123456789
             self.username = "testuser"
             self.first_name = "Test"
     
     class MockMessage:
+        """Mock Telegram message for testing."""
         def __init__(self):
             self.text = "/test"
             self.message_id = 1
@@ -144,6 +146,7 @@ def mock_telegram_update():
             return MockMessage()
     
     class MockUpdate:
+        """Mock Telegram update for testing."""
         def __init__(self):
             self.effective_user = MockUser()
             self.message = MockMessage()
@@ -155,6 +158,7 @@ def mock_telegram_update():
 def mock_telegram_context():
     """Mock Telegram context fixture'ı."""
     class MockContext:
+        """Mock Telegram context for testing."""
         def __init__(self):
             self.args = ['BTC']
     

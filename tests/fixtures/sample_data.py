@@ -32,7 +32,7 @@ def create_sample_ohlcv_data(symbol: str = 'BTC/USDT', periods: int = 200) -> pd
         prices.append(current_price)
     
     # OHLCV verisi oluştur
-    data = []
+    ohlcv_records = []
     for i, (date, price) in enumerate(zip(dates, prices)):
         # High/Low/Close için küçük varyasyonlar
         high = price * (1 + np.random.uniform(0, 0.02))
@@ -40,7 +40,7 @@ def create_sample_ohlcv_data(symbol: str = 'BTC/USDT', periods: int = 200) -> pd
         close = price * (1 + np.random.uniform(-0.01, 0.01))
         volume = np.random.uniform(1000, 10000)
         
-        data.append({
+        ohlcv_records.append({
             'timestamp': date,
             'open': price,
             'high': high,
@@ -49,7 +49,7 @@ def create_sample_ohlcv_data(symbol: str = 'BTC/USDT', periods: int = 200) -> pd
             'volume': volume
         })
     
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(ohlcv_records)
     df.set_index('timestamp', inplace=True)
     return df
 

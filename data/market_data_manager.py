@@ -80,7 +80,7 @@ class MarketDataManager:
         Returns:
             DataFrame containing OHLCV data or None
         """
-        # Sembol whitelist kontrolü
+        # Symbol whitelist check
         if not self.is_valid_symbol(symbol):
             self.logger.warning(
                 f"Invalid symbol (not in whitelist): symbol={symbol} timeframe={timeframe}"

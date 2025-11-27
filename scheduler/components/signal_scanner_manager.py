@@ -1,6 +1,6 @@
 """
-SignalScannerManager: Arkaplanda sinyal tarayan ve bildirim gönderen manager.
-Top 5 futures coin'i tarar, güçlü sinyalleri yakalar ve aktif sinyal kontrolü uygular.
+SignalScannerManager: Background signal scanner and notification manager.
+Scans top 5 futures coins, captures strong signals, and applies active signal checks.
 """
 import time
 import json
@@ -21,7 +21,7 @@ from data.market_data_manager import MarketDataManager
 
 
 class SignalScannerManager:
-    """Sinyal tarama ve bildirim manager'ı."""
+    """Signal scanning and notification manager."""
     
     def __init__(
         self,
@@ -41,7 +41,7 @@ class SignalScannerManager:
         config=None  # ConfigManager instance for direction-specific thresholds
     ):
         """
-        SignalScannerManager'ı başlatır.
+        Initializes SignalScannerManager.
         
         Args:
         Args:
@@ -51,8 +51,8 @@ class SignalScannerManager:
             entry_calculator: Dynamic entry calculator
             message_formatter: Message formatter
             bot_manager: Telegram bot manager
-            channel_id: Telegram kanal ID
-            signal_repository: Signal repository (opsiyonel, sinyal kaydetme için)
+            channel_id: Telegram channel ID
+            signal_repository: Signal repository (optional, for saving signals)
             confidence_threshold: Minimum confidence threshold (default: 0.69 = %69)
                 DEPRECATED: Use config.confidence_threshold_long/short instead
             config: ConfigManager instance (for direction-specific thresholds)
@@ -75,10 +75,10 @@ class SignalScannerManager:
         
         self.logger = LoggerManager().get_logger('SignalScannerManager')
         
-        # SignalRanker instance'ı (RSI ve volume bonusları için)
+        # SignalRanker instance (for RSI and volume bonuses)
         self.signal_ranker = SignalRanker()
         
-        # Sinyal cache: {symbol: {last_signal_time, last_direction, confidence}}
+        # Signal cache: {symbol: {last_signal_time, last_direction, confidence}}
         self.signal_cache: Dict[str, Dict] = {}
         
         # Log startup configuration
@@ -98,27 +98,27 @@ class SignalScannerManager:
             short_threshold, short_threshold * 100
         )
 
-        # Aktif sinyal kontrolü için cache warmup
+        # Cache warmup for active signal check
         self._warmup_cache_from_db()
     
     def scan_for_signals(self) -> None:
         """
-        Top Futures coin'i tarar (Hibrit: Majors + Radar).
+        Scans Top Futures coins (Hybrid: Majors + Radar).
         """
         try:
             self.logger.info("Sinyal tarama başlatıldı (Hibrit Mod)")
             
-            # Piyasa Nabzı Raporu (Market Pulse Log) - Tarama başında
+            # Market Pulse Report (Market Pulse Log) - At the beginning of scan
             self._log_market_pulse()
             
-            # Hibrit Tarama Listesi (Count = 50)
+            # Hybrid Scan List (Count = 50)
             symbols = self.coin_filter.get_top_futures_coins(50)
             
             if not symbols:
                 self.logger.warning("Futures coin listesi alınamadı")
                 return
             
-            # İstatistikler
+            # Statistics
             stats = {
                 'TOTAL_SCANNED': 0,
                 'GENERATED': 0,
@@ -130,7 +130,7 @@ class SignalScannerManager:
                 'NO_SIGNAL': 0
             }
             
-            # Her coin için sinyal kontrolü
+            # Signal check for each coin
             for symbol in symbols:
                 try:
                     stats['TOTAL_SCANNED'] += 1
@@ -138,7 +138,7 @@ class SignalScannerManager:
                 except Exception as e:
                     self.logger.error(f"{symbol} sinyal kontrolü hatası: {str(e)}", exc_info=True)
             
-            # Tarama Özeti Raporu
+            # Scan Summary Report
             self._log_scan_summary(stats)
             self.logger.info("Sinyal tarama tamamlandı")
             
@@ -147,14 +147,14 @@ class SignalScannerManager:
     
     def _check_symbol_signal(self, symbol: str, stats: Dict = None) -> None:
         """
-        Tek bir coin için sinyal kontrolü yapar.
+        Performs signal check for a single coin.
         
         Args:
             symbol: Trading pair (örn: BTC/USDT)
             stats: İstatistik dict (referans olarak güncellenir)
         """
         try:
-            # Coin için sinyal analizi yap (return_reason=True ile)
+            # Analyze signal for coin (with return_reason=True)
             signal_data, reason = self._analyze_symbol(symbol, return_reason=True)
             
             if not signal_data:
@@ -177,34 +177,34 @@ class SignalScannerManager:
                 if stats: stats['NO_SIGNAL'] += 1
                 return
             
-            # Genel sinyal bilgilerini al
+            # Get general signal info
             overall_direction = signal_data.get('direction')
             overall_confidence = signal_data.get('confidence', 0.0)
             
-            # SignalRanker ile bonus skorları hesapla
-            # SignalRanker'ın beklediği format: [{'symbol': str, 'signal': dict}]
+            # Calculate bonus scores with SignalRanker
+            # Format expected by SignalRanker: [{'symbol': str, 'signal': dict}]
             signal_for_ranker = [{
                 'symbol': symbol,
                 'signal': signal_data
             }]
             
-            # RSI ve volume bonusları ile total score hesapla
+            # Calculate total score with RSI and volume bonuses
             ranked_signals = self.signal_ranker.rank_signals(signal_for_ranker, top_count=1)
             
             if ranked_signals:
-                # Rank edilmiş sinyal bulundu, total score'u direkt al (tekrar hesaplama yok!)
+                # Ranked signal found, get total score directly (no recalculation!)
                 ranked_signal = ranked_signals[0]
                 
-                # SignalRanker'dan gelen _ranking_info içinde tüm score bilgileri var
+                # _ranking_info from SignalRanker contains all score info
                 ranking_info = ranked_signal.get('_ranking_info', {})
                 total_score = ranking_info.get('total_score', 0.0)
                 rsi_bonus = ranking_info.get('rsi_bonus', 0.0)
                 volume_bonus = ranking_info.get('volume_bonus', 0.0)
                 base_score = ranking_info.get('base_score', 0.0)
 
-                # BUG FIX: Raporlanan güven skorunu, bonuslar dahil edilmiş total_score ile güncelle.
-                # Bu, filtrelenen skor ile kullanıcıya gösterilen skorun aynı olmasını sağlar.
-                # Confidence değeri %100'ü aşamaz (1.0 cap)
+                # BUG FIX: Update reported confidence score with total_score including bonuses.
+                # This ensures the score filtered is the same as the one shown to the user.
+                # Confidence value cannot exceed 100% (1.0 cap)
                 capped_confidence = min(total_score, 1.0)
                 signal_data['confidence'] = capped_confidence
                 
@@ -233,7 +233,7 @@ class SignalScannerManager:
                     if stats: stats['REJECTED_CONFIDENCE'] += 1
                     return
             else:
-                # Rank edilemedi (threshold altı)
+                # Could not be ranked (below threshold)
                 self.logger.debug(
                     f"{symbol} sinyal: direction={overall_direction}, "
                     f"confidence={overall_confidence:.3f} (rank edilemedi)"
@@ -270,7 +270,7 @@ class SignalScannerManager:
                     return
             
             # Trending market + opposite direction = mismatch
-            # NEUTRAL yönlü sinyaller kanala gönderilmez (UX/gürültü kontrolü)
+            # NEUTRAL direction signals are not sent to channel (UX/noise control)
             if overall_direction == 'NEUTRAL':
                 self.logger.debug(
                     f"{symbol} sinyali NEUTRAL (score={total_score:.3f}); kanal bildirimi atlandı"
@@ -278,8 +278,8 @@ class SignalScannerManager:
                 if stats: stats['NO_SIGNAL'] += 1 # NEUTRAL teknik olarak sinyal değil
                 return
             
-            # TREND-YÖN UYUMSUZLUĞU KONTROLÜ (Finans Uzmanı Önerisi)
-            # LONG sinyali trending_down'da, SHORT sinyali trending_up'da reddedilmeli
+            # TREND-DIRECTION MISMATCH CHECK (Financial Expert Recommendation)
+            # LONG signal in trending_down, SHORT signal in trending_up should be rejected
             market_context = signal_data.get('market_context', {})
             regime = market_context.get('regime')
             adx_strength = market_context.get('adx_strength', 0)
@@ -300,40 +300,40 @@ class SignalScannerManager:
                 if stats: stats['REJECTED_TREND'] += 1
                 return
             
-            # VOLATİLİTE FİLTRESİ (Finans Uzmanı Önerisi)
-            # NOT: Volatilite cezası zaten adaptive_thresholds.py içinde uygulanıyor.
-            # Burada tekrar uygulamak "çift ceza" (double penalty) yaratıyor.
-            # Bu nedenle buradaki kod bloğu devre dışı bırakıldı.
+            # VOLATILITY FILTER (Financial Expert Recommendation)
+            # NOTE: Volatility penalty is already applied in adaptive_thresholds.py.
+            # Applying it here again creates a "double penalty".
+            # Therefore, this code block is disabled.
             # volatility_percentile = market_context.get('volatility_percentile', 50.0)
             # if volatility_percentile > 80: ... (REMOVED)
             
-            # RANGING PİYASA FİLTRESİ (Finans Uzmanı Önerisi)
-            # Yatay piyasada sadece yüksek güvenli sinyaller geçsin
+            # RANGING MARKET FILTER (Financial Expert Recommendation)
+            # Only high confidence signals should pass in ranging market
             if regime == 'ranging' or adx_strength < 25:
-                # Ranging piyasada veya zayıf trend gücünde threshold yükselt
+                # Raise threshold in ranging market or weak trend
                 ranging_threshold = 0.8
                 if total_score < ranging_threshold:
                     self.logger.info(
                         f"{symbol} ranging/zayıf trend (ADX={adx_strength:.1f}), "
                         f"score={total_score:.3f} < {ranging_threshold}, atlandı"
                     )
-                    if stats: stats['REJECTED_CONFIDENCE'] += 1 # Yüksek threshold'a takıldı
+                    if stats: stats['REJECTED_CONFIDENCE'] += 1 # Stuck at high threshold
                     return
 
-            # Başarılı sinyal
+            # Successful signal
             if stats: stats['GENERATED'] += 1
 
-            # _temp_signal_data'yı doldur (rejected signal kaydı için)
+            # Fill _temp_signal_data (for rejected signal record)
             if not hasattr(self, '_temp_signal_data'):
                 self._temp_signal_data = {}
             self._temp_signal_data[symbol] = signal_data
 
-            # Aktif sinyal kontrolü
+            # Active signal check
             should_send = self._should_send_notification(symbol, overall_direction, signal_data)
             if not should_send:
                 return
             
-            # Bildirim gönder
+            # Send notification
             self._send_signal_notification(symbol, signal_data)
             
         except Exception as e:
@@ -342,23 +342,23 @@ class SignalScannerManager:
     
     def _should_send_notification(self, symbol: str, direction: str, signal_data: Dict) -> bool:
         """
-        Bildirim gönderilip gönderilmeyeceğini kontrol eder.
-        Aktif sinyal (message_deleted=0) varsa reddedilir.
+        Checks whether notification should be sent.
+        Rejected if active signal (message_deleted=0) exists.
         
         Args:
             symbol: Trading pair
             direction: LONG/SHORT/NEUTRAL
-            signal_data: Sinyal verisi (rejection kaydı için)
+            signal_data: Signal data (for rejection record)
             
         Returns:
-            True ise bildirim gönderilmeli (aktif sinyal yok)
+            True if notification should be sent (no active signal)
         """
-        # NEUTRAL yönlü sinyaller her zaman reddedilir
+        # NEUTRAL direction signals are always rejected
         if direction == 'NEUTRAL':
             self.logger.debug(
                 f"{symbol} NEUTRAL yönlü sinyal gönderilmiyor"
             )
-            # Rejected signal kaydet
+            # Save rejected signal
             if self.signal_repository:
                 score_breakdown = signal_data.get('score_breakdown', {})
                 market_context = signal_data.get('market_context', {})
@@ -374,23 +374,23 @@ class SignalScannerManager:
                 )
             return False
         
-        # Cache'de aktif sinyal var mı kontrol et
+        # Check if active signal exists in cache
         cache_entry = self.signal_cache.get(symbol)
         
         if cache_entry is None:
-            # Cache miss: DB'den kontrol et
+            # Cache miss: Check from DB
             cache_entry = self._load_cache_entry_from_db(symbol)
             if cache_entry is None:
-                # DB'de de aktif sinyal yok
+                # No active signal in DB either
                 self.logger.debug("%s için aktif sinyal yok, bildirim gönderilecek", symbol)
                 return True
-            # DB'den aktif sinyal bulundu
+            # Active signal found in DB
             self.logger.debug(
                 "%s için aktif sinyal bulundu (DB'den): signal_id=%s",
                 symbol,
                 cache_entry.get('signal_id')
             )
-            # Rejected signal kaydet
+            # Save rejected signal
             if self.signal_repository:
                 score_breakdown = signal_data.get('score_breakdown', {})
                 market_context = signal_data.get('market_context', {})
@@ -406,13 +406,13 @@ class SignalScannerManager:
                 )
             return False
         
-        # Cache'de aktif sinyal var mı?
+        # Is there active signal in cache?
         if cache_entry.get('has_active_signal', False):
             self.logger.debug(
                 "%s için aktif sinyal var (cache'den), bildirim gönderilmeyecek",
                 symbol
             )
-            # Rejected signal kaydet
+            # Save rejected signal
             if self.signal_repository:
                 score_breakdown = signal_data.get('score_breakdown', {})
                 market_context = signal_data.get('market_context', {})
@@ -428,18 +428,18 @@ class SignalScannerManager:
                 )
             return False
         
-        # Aktif sinyal yok
+        # No active signal
         return True
     
     def _load_cache_entry_from_db(self, symbol: str) -> Optional[Dict]:
-        """Cache miss olduğunda veritabanından aktif sinyal kontrolü yapar."""
+        """Checks active signal from database on cache miss."""
         if not self.signal_repository:
             return None
 
-        # Aktif sinyal var mı kontrol et (message_deleted=0, yön fark etmez)
+        # Check if active signal exists (message_deleted=0, direction doesn't matter)
         active_signal = self.signal_repository.get_latest_active_signal_by_symbol(symbol)
         if not active_signal:
-            # Aktif sinyal yok
+            # No active signal
             self._update_signal_cache(
                 symbol=symbol,
                 has_active_signal=False,
@@ -447,7 +447,7 @@ class SignalScannerManager:
             )
             return None
 
-        # Aktif sinyal var
+        # Active signal exists
         return self._update_signal_cache(
             symbol=symbol,
             has_active_signal=True,
@@ -461,14 +461,14 @@ class SignalScannerManager:
 
     def _send_signal_notification(self, symbol: str, signal_data: Dict) -> None:
         """
-        Sinyal bildirimi gönderir.
+        Sends signal notification.
         
         Args:
             symbol: Trading pair
-            signal_data: Sinyal verisi
+            signal_data: Signal data
         """
         try:
-            # Sinyal üretim anındaki fiyat (signal_price)
+            # Price at signal generation time (signal_price)
             current_price = self.market_data.get_latest_price(symbol)
             signal_price = current_price
             signal_created_at = int(time.time())
@@ -477,21 +477,21 @@ class SignalScannerManager:
                 self.logger.warning(f"{symbol} güncel fiyat alınamadı")
                 return
             
-            # Dynamic entry levels hesapla
+            # Calculate dynamic entry levels
             direction = signal_data.get('direction')
             confidence = signal_data.get('confidence', 0.0)
             strategy_type = signal_data.get('strategy_type', 'trend')
             custom_targets = signal_data.get('custom_targets') if isinstance(signal_data.get('custom_targets'), dict) else {}
             
-            # OHLCV verisi al (entry calculation için)
+            # Get OHLCV data (for entry calculation)
             df = None
             atr = None
             
             try:
-                # 1h timeframe'den veri al
+                # Get data from 1h timeframe
                 df = self.market_data.fetch_ohlcv(symbol, '1h', 200)
                 
-                # ATR hesapla (doğru sınıf adı: TechnicalIndicatorCalculator)
+                # Calculate ATR (correct class name: TechnicalIndicatorCalculator)
                 if df is not None and len(df) > 14:
                     from analysis.technical_indicators import TechnicalIndicatorCalculator
                     indicators = TechnicalIndicatorCalculator()
@@ -499,7 +499,7 @@ class SignalScannerManager:
             except Exception as e:
                 self.logger.warning(f"{symbol} OHLCV/ATR hesaplama hatası: {str(e)}")
             
-            # Entry levels hesapla
+            # Calculate entry levels
             entry_levels = self.entry_calc.calculate_entry_levels(
                 symbol=symbol,
                 direction=direction,
@@ -509,21 +509,21 @@ class SignalScannerManager:
                 timeframe='1h'
             )
             
-            # Gönderim anındaki anlık fiyatı yeniden al (küçük farkları göstermek için)
+            # Get current price again at sending time (to show small differences)
             now_price = self.market_data.get_latest_price(symbol)
             if not now_price:
                 now_price = signal_price
             current_price_timestamp = int(time.time())
 
-            # Signal ID oluştur (mesaj formatında gösterilmek için)
+            # Generate Signal ID (to be shown in message format)
             signal_id = None
             if self.signal_repository:
                 signal_id = self.signal_repository.generate_signal_id(symbol)
 
-            # Liquidation risk analizi (Telegram mesajında gösterilmek için - format_signal_alert'ten ÖNCE)
+            # Liquidation risk analysis (To be shown in Telegram message - BEFORE format_signal_alert)
             if self.liquidation_safety_filter:
                 try:
-                    # TP/SL seviyelerini hesapla (liquidation risk analizi için)
+                    # Calculate TP/SL levels (for liquidation risk analysis)
                     if strategy_type == 'ranging' and custom_targets:
                         tp_sl_levels = self._build_custom_tp_sl_levels(custom_targets)
                     else:
@@ -534,11 +534,11 @@ class SignalScannerManager:
                             timeframe='1h'
                         )
                     
-                    # SL fiyatını al (tek stop-loss)
+                    # Get SL price (single stop-loss)
                     sl_price = tp_sl_levels.get('sl_price')
                     
                     if sl_price and sl_price > 0:
-                        # Varsayılan balance (gerçek piyasada config'den okunabilir)
+                        # Default balance (can be read from config in real market)
                         default_balance = 10000.0  # USDT
                         
                         liquidation_risk_percentage = self.liquidation_safety_filter.calculate_liquidation_risk_percentage(
@@ -548,11 +548,11 @@ class SignalScannerManager:
                             balance=default_balance
                         )
                         
-                        # signal_data içine ekle (Telegram mesajında gösterilmek için)
+                        # Add to signal_data (to be shown in Telegram message)
                         if 'liquidation_risk_percentage' not in signal_data:
                             signal_data['liquidation_risk_percentage'] = liquidation_risk_percentage
                         
-                        # Log'a yaz
+                        # Write to log
                         self.logger.info(
                             f"Bu sinyal %{liquidation_risk_percentage:.2f} likidite riski taşımaktadır. "
                             f"(Signal ID: {signal_id}, Symbol: {symbol})"
@@ -565,7 +565,7 @@ class SignalScannerManager:
                         exc_info=True
                     )
 
-            # Mesaj formatla
+            # Format message
             message = self.formatter.format_signal_alert(
                 symbol=symbol,
                 signal_data=signal_data,
@@ -577,13 +577,13 @@ class SignalScannerManager:
                 tp_hit_times=None,
                 sl_hit_times=None,
                 signal_id=signal_id,
-                confidence_change=None  # Yeni sinyal, değişiklik yok
+                confidence_change=None  # New signal, no change
             )
             
-            # Inline keyboard oluştur
+            # Create inline keyboard
             keyboard = self.formatter.create_signal_keyboard(signal_id)
             
-            # Telegram kanalına gönder ve message_id al (keyboard ile)
+            # Send to Telegram channel and get message_id (with keyboard)
             message_id = self._send_to_channel(message, reply_markup=keyboard)
             
             if message_id:
@@ -592,7 +592,7 @@ class SignalScannerManager:
                     f"Message ID: {message_id}, Signal ID: {signal_id}"
                 )
                 
-                # Sinyali veritabanına kaydet
+                # Save signal to database
                 if self.signal_repository and signal_id:
                     try:
                         self._save_signal_to_db(
@@ -613,7 +613,7 @@ class SignalScannerManager:
                             exc_info=True
                         )
 
-                # Cache güncelle (aktif sinyal var)
+                # Update cache (active signal exists)
                 self._update_signal_cache(
                     symbol=symbol,
                     has_active_signal=True,
@@ -624,7 +624,7 @@ class SignalScannerManager:
                     source='send'
                 )
             else:
-                # Mesaj gönderilemedi veya message_id alınamadı
+                # Message could not be sent or message_id could not be obtained
                 error_msg = (
                     f"{symbol} sinyal bildirimi gönderilemedi veya message_id alınamadı - "
                     f"Signal ID: {signal_id if signal_id else 'None'}"
@@ -632,7 +632,7 @@ class SignalScannerManager:
                 self.logger.error(error_msg)
                 
                 # Eğer signal_id varsa, bu durumu daha detaylı logla
-                # (Mesaj gönderilmiş olabilir ama message_id alınamamış olabilir)
+                # (Message might be sent but message_id missing)
                 if signal_id:
                     self.logger.warning(
                         f"⚠️ KRİTİK: {symbol} için sinyal mesajı gönderilmeye çalışıldı ama "
@@ -641,10 +641,10 @@ class SignalScannerManager:
                         f"Bu sinyal manuel olarak veritabanına eklenmelidir."
                     )
                 
-                # ÖNEMLİ: Cache güncellemesi message_id alınamasa bile yapılmalı
-                # Çünkü mesaj Telegram'a gönderilmiş olabilir (ama message_id alınamamış olabilir)
-                # Bu durumda en azından aktif sinyal kontrolü çalışmalı ki aynı sinyal tekrar gönderilmesin
-                # Cache güncelleme, aktif sinyal kontrolü için kritik öneme sahiptir
+                # IMPORTANT: Cache update must be done even if message_id is missing
+                # Because message might be sent to Telegram (but message_id missing)
+                # In this case active signal check must work so same signal is not sent again
+                # Cache update is critical for active signal check
                 self.logger.warning(
                     f"{symbol} için cache güncelleniyor (message_id alınamadı ama aktif sinyal korunmalı) - "
                     f"Signal ID: {signal_id}, Direction: {direction}, Timestamp: {signal_created_at}"
@@ -656,17 +656,17 @@ class SignalScannerManager:
                     direction=direction,
                     confidence=confidence,
                     timestamp=signal_created_at,
-                    source='send-failed'  # Kaynak olarak 'send-failed' kullan
+                    source='send-failed'  # Use 'send-failed' as source
                 )
             
         except Exception as e:
             self.logger.error(f"{symbol} bildirim gönderme hatası: {str(e)}", exc_info=True)
             
-            # Exception durumunda bile cache güncellemesi yapılmalı (aktif sinyal korunmalı)
-            # Eğer mesaj gönderilmeye çalışıldıysa ama exception oluştuysa,
-            # aktif sinyal kontrolünün çalışması için cache güncellenmelidir
+            # Cache update must be done even in exception case (active signal must be preserved)
+            # If message was attempted to be sent but exception occurred,
+            # cache must be updated for active signal check to work
             try:
-                # signal_data parametre olarak geldiği için direkt erişilebilir
+                # signal_data is available as parameter so can be accessed directly
                 direction = signal_data.get('direction')
                 confidence = signal_data.get('confidence', 0.0)
                 signal_created_at = int(time.time())
@@ -682,7 +682,7 @@ class SignalScannerManager:
                         direction=direction,
                         confidence=confidence,
                         timestamp=signal_created_at,
-                        source='send-exception'  # Kaynak olarak 'send-exception' kullan
+                        source='send-exception'  # Use 'send-exception' as source
                     )
             except Exception as cache_error:
                 self.logger.error(
@@ -692,18 +692,18 @@ class SignalScannerManager:
     
     def _send_to_channel(self, message: str, reply_markup: Optional[Any] = None) -> Optional[int]:
         """
-        Mesajı Telegram kanalına gönderir.
+        Sends message to Telegram channel.
         
         Args:
-            message: Gönderilecek mesaj
-            reply_markup: Inline keyboard markup (opsiyonel)
+            message: Message to send
+            reply_markup: Inline keyboard markup (optional)
             
         Returns:
-            Telegram message_id veya None
+            Telegram message_id or None
         """
         try:
-            # Bot manager'ın güvenli sync wrapper metodunu kullan
-            # Bu metod _run_on_bot_loop kullanarak event loop hatalarını önler
+            # Use bot manager's safe sync wrapper method
+            # This method prevents event loop errors by using _run_on_bot_loop
             message_id = self.bot_mgr.send_channel_message(
                 self.channel_id,
                 message,
@@ -732,29 +732,29 @@ class SignalScannerManager:
         timeframe: Optional[str]
     ) -> Dict:
         """
-        TP ve SL seviyelerini hesaplar (message_formatter ile aynı mantık).
+        Calculates TP and SL levels (same logic as message_formatter).
         
         Args:
-            signal_price: Sinyal fiyatı
+            signal_price: Signal price
             direction: LONG/SHORT
-            atr: ATR değeri
+            atr: ATR value
             timeframe: Timeframe
             
         Returns:
-            TP ve SL seviyeleri dict
+            TP and SL levels dict
         """
         tp_levels = {}
         sl_levels = {}
         
-        # TP seviyeleri (Dengeli Yaklaşım: TP1=1.5R, TP2=2.5R)
+        # TP levels (Balanced Approach: TP1=1.5R, TP2=2.5R)
         # TP1 = 3x ATR (1.5R), TP2 = 5x ATR (2.5R)
-        # SL = 2x ATR olduğu için TP1'in R:R oranı 1.5R, TP2'nin R:R oranı 2.5R olur
+        # Since SL = 2x ATR, TP1 R:R ratio is 1.5R, TP2 R:R ratio is 2.5R
         if atr:
             risk_dist = atr
         else:
             risk_dist = signal_price * 0.01
         
-        # TP multipliers: [3, 5] -> TP1=1.5R, TP2=2.5R (SL=2x ATR bazlı)
+        # TP multipliers: [3, 5] -> TP1=1.5R, TP2=2.5R (SL=2x ATR based)
         tp_multipliers = [3, 5]
         for idx, multiplier in enumerate(tp_multipliers, start=1):
             offset = risk_dist * multiplier
@@ -768,8 +768,8 @@ class SignalScannerManager:
             if tp_price:
                 tp_levels[f'tp{idx}_price'] = tp_price
         
-        # SL seviyeleri (Tek SL: 2x ATR)
-        # Dengeli yaklaşım: Tek stop-loss
+        # SL levels (Single SL: 2x ATR)
+        # Balanced approach: Single stop-loss
         sl_multiplier = SL_MULTIPLIER
         if atr:
             offset = atr * sl_multiplier
@@ -797,7 +797,7 @@ class SignalScannerManager:
         self,
         custom_targets: Dict[str, Dict[str, float]]
     ) -> Dict:
-        """Custom TP/SL seviyelerini oluşturur."""
+        """Creates custom TP/SL levels."""
         tp_levels = {}
         sl_levels = {}
         
@@ -836,20 +836,20 @@ class SignalScannerManager:
 
     def _analyze_symbol(self, symbol: str, return_reason: bool = False) -> Union[Optional[Dict], Tuple[Optional[Dict], str]]:
         """
-        Tek sembol için multi-timeframe analiz yapar.
+        Performs multi-timeframe analysis for a single symbol.
         
         Args:
             symbol: Trading pair
-            return_reason: True ise (signal, reason) tuple döndürür
+            return_reason: If True, returns (signal, reason) tuple
             
         Returns:
-            Sinyal bilgisi veya None (veya tuple)
+            Signal info or None (or tuple)
         """
-        # Timeframes config'den alınmalı ama burada hardcoded veya config'den geçilmeli
-        # Şimdilik standart timeframes kullanıyoruz
+        # Timeframes should be taken from config but hardcoded here or passed from config
+        # Using standard timeframes for now
         timeframes = ['1h', '4h', '1d']
         
-        # Multi-timeframe veri çek
+        # Fetch multi-timeframe data
         multi_tf_data = self.market_data.fetch_multi_timeframe(
             symbol, timeframes
         )
@@ -859,7 +859,7 @@ class SignalScannerManager:
                 return None, "NO_DATA"
             return None
         
-        # Sinyal üret (symbol parametresi eklendi)
+        # Generate signal (symbol parameter added)
         signal = self.signal_gen.generate_signal(
             multi_tf_data, symbol=symbol, return_reason=return_reason
         )
@@ -879,34 +879,34 @@ class SignalScannerManager:
         signal_id: Optional[str] = None
     ) -> None:
         """
-        Sinyali veritabanına kaydeder.
+        Saves signal to database.
         
         Args:
             symbol: Trading pair
-            signal_data: Sinyal verisi
+            signal_data: Signal data
             entry_levels: Entry levels
-            signal_price: Sinyal fiyatı
-            atr: ATR değeri
+            signal_price: Signal price
+            atr: ATR value
             timeframe: Timeframe
-            telegram_message_id: Telegram mesaj ID
-            telegram_channel_id: Telegram kanal ID
-            signal_id: Sinyal ID (verilmezse oluşturulur)
+            telegram_message_id: Telegram message ID
+            telegram_channel_id: Telegram channel ID
+            signal_id: Signal ID (generated if not provided)
         """
         try:
             if not self.signal_repository:
                 return
             
-            # Signal ID oluştur (verilmediyse)
+            # Generate Signal ID (if not provided)
             if not signal_id:
                 signal_id = self.signal_repository.generate_signal_id(symbol)
             
-            # Direction ve confidence
+            # Direction and confidence
             direction = signal_data.get('direction', 'NEUTRAL')
             confidence = signal_data.get('confidence', 0.0)
             strategy_type = signal_data.get('strategy_type', 'trend')
             custom_targets = signal_data.get('custom_targets') if isinstance(signal_data.get('custom_targets'), dict) else {}
             
-            # TP/SL seviyelerini hesapla
+            # Calculate TP/SL levels
             if strategy_type == 'ranging' and custom_targets:
                 tp_sl_levels = self._build_custom_tp_sl_levels(custom_targets)
             else:
@@ -917,7 +917,7 @@ class SignalScannerManager:
                     timeframe=timeframe
                 )
             
-            # Score breakdown ve market context (JSON)
+            # Score breakdown and market context (JSON)
             score_breakdown = signal_data.get('score_breakdown', {})
             market_context = signal_data.get('market_context', {})
             
@@ -927,13 +927,13 @@ class SignalScannerManager:
             if not isinstance(market_context, dict):
                 market_context = {}
             
-            # Ticker bilgisi ile market context zenginleştir
+            # Enrich market context with ticker info
             ticker = self.market_data.get_ticker_info(symbol)
             if ticker and market_context:
                 market_context['volume_24h_usd'] = ticker.get('quoteVolume', 0)
                 market_context['price_change_24h_pct'] = ticker.get('percentage', 0)
             
-            # R-distances hesapla
+            # Calculate R-distances
             r_distances = {}
             if self.risk_reward_calc:
                 r_distances = self.risk_reward_calc.calculate_r_distances(
@@ -957,7 +957,7 @@ class SignalScannerManager:
             optimal_entry = optimal_dict.get('price')
             conservative_entry = conservative_dict.get('price')
             
-            # Sinyali kaydet
+            # Save signal
             success = self.signal_repository.save_signal(
                 signal_id=signal_id,
                 symbol=symbol,
@@ -1001,16 +1001,16 @@ class SignalScannerManager:
         source: str = 'runtime'
     ) -> Optional[Dict]:
         """
-        Sinyal cache'ini günceller (aktif sinyal durumunu takip eder).
+        Updates signal cache (tracks active signal status).
         
         Args:
             symbol: Trading pair
-            has_active_signal: Aktif sinyal var mı? (message_deleted=0)
-            signal_id: Signal ID (opsiyonel)
-            direction: LONG/SHORT (opsiyonel)
-            confidence: Confidence değeri (opsiyonel)
-            timestamp: Sinyal zamanı (None ise current time)
-            source: Güncelleme kaynağı (loglama için)
+            has_active_signal: Is there an active signal? (message_deleted=0)
+            signal_id: Signal ID (optional)
+            direction: LONG/SHORT (optional)
+            confidence: Confidence value (optional)
+            timestamp: Signal time (current time if None)
+            source: Update source (for logging)
         """
         current_time = timestamp if timestamp is not None else int(time.time())
         
@@ -1036,12 +1036,12 @@ class SignalScannerManager:
         return self.signal_cache[symbol]
     
     def _warmup_cache_from_db(self) -> None:
-        """Uygulama başlatılırken aktif sinyal cache'ini veritabanından doldurur."""
+        """Populates active signal cache from database on startup."""
         if not self.signal_repository:
             self.logger.debug("Aktif sinyal cache warmup atlandı: SignalRepository tanımlı değil")
             return
 
-        # Son 24 saat içindeki aktif sinyalleri yükle
+        # Load active signals from last 24 hours
         lookback_hours = 24
 
         summaries = self.signal_repository.get_recent_signal_summaries(lookback_hours)
@@ -1053,7 +1053,7 @@ class SignalScannerManager:
             return
 
         for summary in summaries:
-            # Her summary aktif sinyal demektir (get_recent_signal_summaries zaten message_deleted=0 kontrolü yapıyor)
+            # Each summary means active signal (get_recent_signal_summaries already checks message_deleted=0)
             self._update_signal_cache(
                 symbol=summary.get('symbol'),
                 has_active_signal=True,
@@ -1095,14 +1095,14 @@ class SignalScannerManager:
 
     def get_cache_stats(self) -> Dict:
         """
-        Cache istatistiklerini döndürür.
+        Returns cache statistics.
         
         Returns:
-            Cache istatistikleri
+            Cache statistics
         """
         active_signals = sum(
-            1 for data in self.signal_cache.values()
-            if data.get('has_active_signal', False)
+            1 for cache_entry in self.signal_cache.values()
+            if cache_entry.get('has_active_signal', False)
         )
         
         return {
@@ -1112,12 +1112,12 @@ class SignalScannerManager:
         }
     
     def cleanup_old_cache(self) -> None:
-        """Pasif sinyalleri (has_active_signal=False) cache'den temizler."""
+        """Clears passive signals (has_active_signal=False) from cache."""
         symbols_to_remove = []
         
-        for symbol, data in self.signal_cache.items():
-            # Aktif sinyal yoksa cache'den kaldır
-            if not data.get('has_active_signal', False):
+        for symbol, cache_entry in self.signal_cache.items():
+            # Remove from cache if no active signal
+            if not cache_entry.get('has_active_signal', False):
                 symbols_to_remove.append(symbol)
         
         for symbol in symbols_to_remove:
@@ -1137,15 +1137,15 @@ class SignalScannerManager:
         reject_reason: str = None
     ) -> None:
         """
-        Reddedilme Karnesi (Rejection Scorecard) - Kompakt log.
+        Rejection Scorecard - Compact log.
         
         Args:
             symbol: Trading pair
-            score: Toplam skor (confidence)
-            threshold: Minimum eşik değeri
-            signal_data: Sinyal verisi (score_breakdown, market_context içerir)
-            ranking_info: Ranking bilgileri (opsiyonel)
-            reject_reason: Rejection nedeni (opsiyonel)
+            score: Total score (confidence)
+            threshold: Minimum threshold value
+            signal_data: Signal data (contains score_breakdown, market_context)
+            ranking_info: Ranking info (optional)
+            reject_reason: Rejection reason (optional)
         """
         try:
             market_context = signal_data.get('market_context', {})
@@ -1183,7 +1183,7 @@ class SignalScannerManager:
             )
     
     def _get_indicator_status(self, signal: str, direction: str, value: float) -> str:
-        """İndikatör durumunu formatla."""
+        """Format indicator status."""
         if signal == direction:
             return f"✅ Uyumlu ({signal})"
         elif signal == 'NEUTRAL':
@@ -1192,7 +1192,7 @@ class SignalScannerManager:
             return f"❌ Ters ({signal})"
     
     def _get_trend_status(self, signal: str, direction: str, adx_value: float) -> str:
-        """Trend durumunu formatla."""
+        """Format trend status."""
         if signal == direction:
             if adx_value > 25:
                 return f"✅ Güçlü Trend ({signal})"
@@ -1204,7 +1204,7 @@ class SignalScannerManager:
             return f"❌ Ters Trend ({signal})"
     
     def _get_volume_status(self, relative: float, signal: str) -> str:
-        """Hacim durumunu formatla."""
+        """Format volume status."""
         if relative >= 1.5:
             return f"✅ Yüksek (x{relative:.2f})"
         elif relative >= 1.0:
@@ -1214,12 +1214,12 @@ class SignalScannerManager:
     
     def _log_market_pulse(self) -> None:
         """
-        Piyasa Nabzı Raporu (Market Pulse Log) - Genel piyasa durumunu özetler.
+        Market Pulse Report (Market Pulse Log) - Summarizes general market status.
         """
         try:
             from datetime import datetime
             
-            # BTC durumunu kontrol et
+            # Check BTC status
             btc_ticker = None
             btc_status = "Bilinmiyor"
             btc_change_24h = 0.0
@@ -1229,12 +1229,12 @@ class SignalScannerManager:
                 if self.market_data:
                     btc_ticker = self.market_data.get_ticker_info("BTC/USDT")
                     if btc_ticker:
-                        # CCXT standart alanı: 'percentage' (SignalGenerator ile tutarlı)
+                        # CCXT standard field: 'percentage' (Consistent with SignalGenerator)
                         btc_change_24h = float(btc_ticker.get('percentage', 0) or 0)
-                        # Eğer 'percentage' yoksa, 'info' içindeki ham veriye bak
+                        # If 'percentage' missing, check raw data in 'info'
                         if btc_change_24h == 0 and 'info' in btc_ticker:
                             btc_change_24h = float(btc_ticker['info'].get('priceChangePercent', 0) or 0)
-                        # RSI için 1h veri çek
+                        # Fetch 1h data for RSI
                         btc_1h_data = self.market_data.fetch_ohlcv("BTC/USDT", "1h", limit=200)
                         if btc_1h_data is not None and len(btc_1h_data) > 0:
                             from analysis.technical_indicators import TechnicalIndicatorCalculator
@@ -1243,7 +1243,7 @@ class SignalScannerManager:
                             rsi_data = indicators.get('rsi', {})
                             btc_rsi = rsi_data.get('value', 0)
                         
-                        # BTC durumunu belirle
+                        # Determine BTC status
                         if btc_change_24h < -3.0 or btc_rsi < 30:
                             btc_status = "⚠️ Çöküş Riski"
                         elif btc_change_24h < -1.0:
@@ -1257,10 +1257,10 @@ class SignalScannerManager:
             except Exception as e:
                 self.logger.debug(f"BTC durumu kontrolü hatası: {str(e)}")
             
-            # Zaman bilgisi
+            # Time info
             current_time = datetime.now().strftime("%H:%M")
             
-            # Log mesajı
+            # Log message
             log_lines = [
                 f"🌍 PİYASA NABZI ({current_time}):",
                 f"   • BTC Durumu: {btc_status} (24h: {btc_change_24h:+.2f}%, RSI: {btc_rsi:.1f})"
@@ -1273,7 +1273,7 @@ class SignalScannerManager:
 
     def _log_scan_summary(self, stats: Dict) -> None:
         """
-        Tarama Özeti Raporu - Her döngü sonunda reddedilme nedenlerini özetler.
+        Scan Summary Report - Summarizes rejection reasons at the end of each cycle.
         """
         try:
             total = stats.get('TOTAL_SCANNED', 0)
@@ -1303,7 +1303,7 @@ class SignalScannerManager:
             
             log_lines.append(f"----------------------------------------")
             
-            # Sonuç yorumu
+            # Result comment
             if generated > 0:
                 result = "Fırsat bulundu!"
             elif rejected_btc > 0:

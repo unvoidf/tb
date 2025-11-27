@@ -1,6 +1,6 @@
 """
-CoinFilter: Hacim bazlı coin filtreleme sınıfı.
-Son 1 saatlik hacmi en yüksek USDT çiftlerini seçer.
+CoinFilter: Volume-based coin filtering class.
+Selects USDT pairs with the highest volume in the last 1 hour.
 """
 import ccxt
 import numpy as np
@@ -12,14 +12,14 @@ from data.filters.coin_scorer import CoinScorer
 
 
 class CoinFilter:
-    """Binance'den hacim bazlı coin filtreleme yapar."""
+    """Performs volume-based coin filtering from Binance."""
     
     def __init__(self, retry_handler: RetryHandler):
         """
-        CoinFilter'ı başlatır.
+        Initializes CoinFilter.
         
         Args:
-            retry_handler: Retry mekanizması instance
+            retry_handler: Retry mechanism instance
         """
         self.exchange = ExchangeFactory.create_binance_futures()
         self.retry_handler = retry_handler
@@ -28,53 +28,53 @@ class CoinFilter:
     
     def get_top_volume_coins(self, count: int = 20) -> List[str]:
         """
-        Son 1 saatlik hacmi en yüksek USDT çiftlerini döndürür.
+        Returns USDT pairs with the highest volume in the last 1 hour.
         
         Args:
-            count: Döndürülecek coin sayısı
+            count: Number of coins to return
             
         Returns:
-            Sembol listesi (örn: ['BTC/USDT', 'ETH/USDT', ...])
+            List of symbols (e.g., ['BTC/USDT', 'ETH/USDT', ...])
         """
         try:
-            # Tüm ticker'ları çek
+            # Fetch all tickers
             tickers = self.retry_handler.execute(
                 self.exchange.fetch_tickers
             )
             self.logger.debug(f"tickers_count={len(tickers)}")
             
-            # USDT çiftlerini filtrele
+            # Filter USDT pairs
             usdt_pairs = self._filter_usdt_pairs(tickers)
             self.logger.debug(f"usdt_pairs_count={len(usdt_pairs)}")
             
-            # Hacme göre sırala ve top N'i al
+            # Sort by volume and get top N
             sorted_pairs = self._sort_by_volume(usdt_pairs, count)
             self.logger.debug(f"sorted_pairs_topN={sorted_pairs[:3]}")
             
             symbols = [item['symbol'] for item in sorted_pairs]
             
             self.logger.info(
-                f"Top {count} hacimli coin seçildi: {', '.join(symbols[:5])}..."
+                f"Top {count} volume coins selected: {', '.join(symbols[:5])}..."
             )
             
             return symbols
             
         except Exception as e:
             self.logger.error(
-                f"Coin filtreleme hatası: {str(e)}",
+                f"Coin filtering error: {str(e)}",
                 exc_info=True
             )
             return self._get_fallback_coins(count)
     
     def _filter_usdt_pairs(self, tickers: Dict) -> List[Dict]:
         """
-        Sadece USDT çiftlerini filtreler.
+        Filters only USDT pairs.
         
         Args:
-            tickers: Tüm ticker bilgileri
+            tickers: All ticker info
             
         Returns:
-            USDT çiftleri listesi
+            List of USDT pairs
         """
         usdt_pairs = []
         
@@ -94,28 +94,28 @@ class CoinFilter:
     
     def _is_leveraged_token(self, symbol: str) -> bool:
         """
-        Leverage token kontrolü (UP, DOWN, BULL, BEAR vb.).
+        Leverage token check (UP, DOWN, BULL, BEAR etc.).
         
         Args:
             symbol: Trading pair
             
         Returns:
-            True ise leverage token
+            True if leverage token
         """
         leverage_keywords = ['UP/', 'DOWN/', 'BULL/', 'BEAR/']
         return any(keyword in symbol for keyword in leverage_keywords)
     
     def _is_stablecoin(self, symbol: str) -> bool:
         """
-        Stablecoin kontrolü (USDC, USDT, BUSD, DAI vb.).
+        Stablecoin check (USDC, USDT, BUSD, DAI etc.).
         
         Args:
             symbol: Trading pair
             
         Returns:
-            True ise stablecoin
+            True if stablecoin
         """
-        # Sadece gerçek stablecoin'leri filtrele
+        # Filter only real stablecoins
         stablecoins = ['USDC/USDT', 'BUSD/USDT', 'DAI/USDT', 'TUSD/USDT', 
                        'USDD/USDT', 'USDP/USDT', 'FDUSD/USDT', 'USDE/USDT']
         return symbol in stablecoins
@@ -123,14 +123,14 @@ class CoinFilter:
     def _sort_by_volume(self, pairs: List[Dict], 
                        count: int) -> List[Dict]:
         """
-        Çiftleri hacme göre sıralar ve ilk N'i döndürür.
+        Sorts pairs by volume and returns top N.
         
         Args:
-            pairs: Coin çiftleri listesi
-            count: Döndürülecek sayı
+            pairs: List of coin pairs
+            count: Number to return
             
         Returns:
-            Sıralanmış liste
+            Sorted list
         """
         sorted_pairs = sorted(
             pairs,
@@ -141,95 +141,95 @@ class CoinFilter:
     
     def get_top_futures_coins(self, count: int = 50) -> List[str]:
         """
-        Hibrit Dinamik Tarama (Majors + Momentum) ile coin seçer.
+        Selects coins with Hybrid Dynamic Scan (Majors + Momentum).
         
         Args:
-            count: Toplam döndürülecek coin sayısı (Default: 50)
+            count: Total number of coins to return (Default: 50)
             
         Returns:
-            Futures coin sembol listesi (Majors + Momentum)
+            Futures coin symbol list (Majors + Momentum)
         """
         try:
-            # Futures exchange instance oluştur
+            # Create futures exchange instance
             futures_exchange = ExchangeFactory.create_binance_futures()
             
-            # Futures ticker'ları çek
+            # Fetch futures tickers
             tickers = self.retry_handler.execute(
                 futures_exchange.fetch_tickers
             )
             self.logger.debug(f"futures_tickers_count={len(tickers)}")
             
-            # 1. Majors (Demirbaşlar) - Limit: 15
-            # Smart Liquidity + Stability Score ile en güvenilir coinler
+            # 1. Majors (Blue Chips) - Limit: 15
+            # Most reliable coins with Smart Liquidity + Stability Score
             major_count = 15
             major_coins = self._get_smart_coins(tickers, major_count)
             self.logger.info(
                 f"🏰 Majors ({len(major_coins)}): {', '.join(major_coins)}"
             )
             
-            # 2. Momentum (Radar) - Limit: Kalan (örn: 35)
-            # Fiyat değişimi (Volatility) ve Hacim ile "Hareketli" coinler
+            # 2. Momentum (Radar) - Limit: Remaining (e.g., 35)
+            # "Active" coins with Price Change (Volatility) and Volume
             momentum_count = max(0, count - len(major_coins))
             momentum_coins = self._get_momentum_coins(tickers, momentum_count, exclude=major_coins)
             self.logger.info(
                 f"📡 Radar ({len(momentum_coins)}): {', '.join(momentum_coins)}"
             )
             
-            # İki listeyi birleştir
+            # Combine two lists
             combined_coins = list(set(major_coins + momentum_coins))
             
             self.logger.info(
-                f"Hibrit Tarama Toplam {len(combined_coins)} coin: {', '.join(combined_coins)}"
+                f"Hybrid Scan Total {len(combined_coins)} coins: {', '.join(combined_coins)}"
             )
             
             return combined_coins
             
         except Exception as e:
             self.logger.error(
-                f"Hibrit coin filtreleme hatası: {str(e)}",
+                f"Hybrid coin filtering error: {str(e)}",
                 exc_info=True
             )
             return self._get_futures_fallback_coins(count)
 
     def _get_momentum_coins(self, tickers: Dict, count: int, exclude: List[str] = []) -> List[str]:
         """
-        Momentum (Radar) Filtresi: Fiyat değişimi yüksek olan hareketli coinleri seçer.
+        Momentum (Radar) Filter: Selects active coins with high price change.
         
         Args:
-            tickers: Ticker bilgileri
-            count: İstene coin sayısı
-            exclude: Hariç tutulacak coinler (Majors listesi)
+            tickers: Ticker info
+            count: Number of coins requested
+            exclude: Coins to exclude (Majors list)
             
         Returns:
-            Momentum coin sembol listesi
+            Momentum coin symbol list
         """
         momentum_candidates = []
         
         for symbol, ticker in tickers.items():
-            # Futures sembol formatını normalize et
+            # Normalize futures symbol format
             normalized_symbol = symbol.replace(':USDT', '').replace(':USDC', '')
             
-            # Zaten Majors listesindeyse atla
+            # Skip if already in Majors list
             if normalized_symbol in exclude:
                 continue
                 
-            # Temel filtreler (Leverage token, stablecoin, dead coin vb.)
+            # Basic filters (Leverage token, stablecoin, dead coin etc.)
             if not self._passes_quick_filters(normalized_symbol, ticker):
                 continue
             
-            # Momentum Kriteri: Fiyat Değişimi (Mutlak Değer)
-            # Hem çok düşenleri (Oversold fırsatı) hem çok çıkanları (Trend fırsatı) yakalar
+            # Momentum Criterion: Price Change (Absolute Value)
+            # Captures both big drops (Oversold opportunity) and big pumps (Trend opportunity)
             price_change_percent = abs(float(ticker.get('percentage', 0) or 0))
             
-            # Ek Kriter: Yeterli Hacim (Pump/Dump tuzağı olmaması için)
-            # Majors kadar yüksek olmasına gerek yok ama en az 5M USDT olsun
+            # Extra Criterion: Sufficient Volume (to avoid Pump/Dump traps)
+            # Doesn't need to be as high as Majors but at least 5M USDT
             quote_volume = float(ticker.get('quoteVolume', 0) or 0)
             if quote_volume < 5000000: # 5M USDT
                 continue
                 
             momentum_candidates.append((normalized_symbol, price_change_percent))
             
-        # Fiyat değişimine göre sırala (En çok hareket eden en üstte)
+        # Sort by price change (Most active on top)
         momentum_candidates.sort(key=lambda x: x[1], reverse=True)
         
         selected = [symbol for symbol, pct in momentum_candidates[:count]]
@@ -237,51 +237,51 @@ class CoinFilter:
     
     def _filter_futures_usdt_pairs(self, tickers: Dict) -> List[Dict]:
         """
-        Futures USDT çiftlerini filtreler (stablecoin'siz).
+        Filters Futures USDT pairs (without stablecoins).
         
         Args:
-            tickers: Futures ticker bilgileri
+            tickers: Futures ticker info
             
         Returns:
-            Futures USDT çiftleri listesi
+            List of Futures USDT pairs
         """
         futures_pairs = []
         usdt_count = 0
         filtered_count = 0
         
         for symbol, ticker in tickers.items():
-            # Futures sembol formatını normalize et (LQTY/USDT:USDT -> LQTY/USDT)
+            # Normalize futures symbol format (LQTY/USDT:USDT -> LQTY/USDT)
             normalized_symbol = symbol.replace(':USDT', '').replace(':USDC', '')
             
-            # Debug: USDT pair sayısını say
+            # Debug: Count USDT pairs
             if normalized_symbol.endswith('/USDT'):
                 usdt_count += 1
                 
-                # Debug: Filtreleme adımlarını kontrol et
+                # Debug: Check filtering steps
                 has_volume = ticker.get('quoteVolume') is not None
                 is_leveraged = self._is_leveraged_token(normalized_symbol)
                 is_stablecoin = self._is_stablecoin(normalized_symbol)
                 is_excluded = self._is_futures_excluded(normalized_symbol)
                 
-                # Ölü coin kontrolü ekle
+                # Add dead coin check
                 is_dead_coin = self._is_dead_coin(normalized_symbol, ticker)
                 
                 if (has_volume and 
                     not is_leveraged and 
                     not is_stablecoin and 
                     not is_excluded and
-                    not is_dead_coin):  # Ölü coin kontrolü eklendi
+                    not is_dead_coin):  # Dead coin check added
                     
                     futures_pairs.append({
-                        'symbol': normalized_symbol,  # Normalize edilmiş sembol kullan
+                        'symbol': normalized_symbol,  # Use normalized symbol
                         'volume': ticker['quoteVolume'],
                         'price': ticker.get('last', 0)
                     })
                     filtered_count += 1
                 else:
-                    # Debug: Neden filtrelendiğini logla
+                    # Debug: Log why filtered
                     self.logger.debug(
-                        f"Futures {normalized_symbol} filtrelendi: "
+                        f"Futures {normalized_symbol} filtered: "
                         f"volume={has_volume}, leveraged={is_leveraged}, "
                         f"stablecoin={is_stablecoin}, excluded={is_excluded}, "
                         f"dead_coin={is_dead_coin}"
@@ -292,98 +292,98 @@ class CoinFilter:
     
     def _is_futures_excluded(self, symbol: str) -> bool:
         """
-        Futures'ta hariç tutulacak coinler.
+        Coins to exclude in Futures.
         
         Args:
             symbol: Trading pair
             
         Returns:
-            True ise hariç tutulacak
+            True if excluded
         """
-        # Futures'ta olmayan veya problemli coinler
+        # Coins not in Futures or problematic
         excluded = [
-            'LUNA/USDT', 'UST/USDT', 'FTT/USDT',  # Problemli coinler
-            'BUSD/USDT', 'USDC/USDT',  # Stablecoin'ler
+            'LUNA/USDT', 'UST/USDT', 'FTT/USDT',  # Problematic coins
+            'BUSD/USDT', 'USDC/USDT',  # Stablecoins
         ]
         return any(excluded_symbol in symbol for excluded_symbol in excluded)
     
     def _is_dead_coin(self, symbol: str, ticker: Dict) -> bool:
         """
-        Ölü coin kontrolü yapar.
+        Checks for dead coins.
         
         Args:
-            symbol: Coin sembolü
-            ticker: Ticker bilgileri
+            symbol: Coin symbol
+            ticker: Ticker info
             
         Returns:
-            True ise ölü coin
+            True if dead coin
         """
-        # Volume kontrolü - çok düşük volume
+        # Volume check - very low volume
         quote_volume = ticker.get('quoteVolume', 0)
         if quote_volume < 10000:  # Minimum 10K USDT volume
-            self.logger.debug(f"Futures {symbol} filtrelendi: volume={quote_volume} (çok düşük)")
+            self.logger.debug(f"Futures {symbol} filtered: volume={quote_volume} (too low)")
             return True
         
-        # Fiyat değişimi kontrolü - hiç hareket yok
+        # Price change check - no movement
         price_change_percent = abs(ticker.get('percentage', 0))
-        if price_change_percent < 0.01:  # %0.01'den az değişim
-            self.logger.debug(f"Futures {symbol} filtrelendi: price_change={price_change_percent}% (çok düşük)")
+        if price_change_percent < 0.01:  # Less than 0.01% change
+            self.logger.debug(f"Futures {symbol} filtered: price_change={price_change_percent}% (too low)")
             return True
         
-        # Base volume kontrolü
+        # Base volume check
         base_volume = ticker.get('baseVolume', 0)
         if base_volume < 1000:  # Minimum base volume
-            self.logger.debug(f"Futures {symbol} filtrelendi: base_volume={base_volume} (çok düşük)")
+            self.logger.debug(f"Futures {symbol} filtered: base_volume={base_volume} (too low)")
             return True
         
         return False
     
     def _get_smart_coins(self, tickers: Dict, count: int) -> List[str]:
         """
-        Smart Liquidity + Stability Score ile coin seçimi (optimized).
+        Coin selection with Smart Liquidity + Stability Score (optimized).
         
         Args:
-            tickers: Ticker bilgileri
-            count: Döndürülecek coin sayısı
+            tickers: Ticker info
+            count: Number of coins to return
             
         Returns:
-            Seçilen coin sembolleri
+            Selected coin symbols
         """
-        # Önce hızlı filtreleme ile top 50'yi al
+        # Get top 50 with quick filtering first
         quick_candidates = self._get_quick_candidates(tickers, 50)
         
         if len(quick_candidates) <= count:
             return [symbol for symbol, _ in quick_candidates]
         
-        # Sadece top 50 için smart scoring uygula
+        # Apply smart scoring only for top 50
         smart_candidates = []
         
         for symbol, ticker in quick_candidates:
-            # Minimum veri kontrolü
+            # Minimum data check
             if not self._has_sufficient_data(symbol):
                 self.logger.debug(f"Smart selection {symbol}: insufficient data")
                 continue
             
-            # Smart scoring (CoinScorer kullanarak)
+            # Smart scoring (using CoinScorer)
             liquidity_score = self.coin_scorer.calculate_liquidity_score(ticker)
             stability_score = self.coin_scorer.calculate_stability_score(ticker)
-            # Volume pattern için eski metod kullanılıyor (OHLCV gerektiriyor)
+            # Volume pattern uses old method (requires OHLCV)
             volume_pattern_score = self._analyze_volume_pattern(symbol)
             
-            # Stabilite skoru 0.0 olan coinleri filtrele
+            # Filter coins with 0.0 stability score
             if stability_score == 0.0:
                 self.logger.debug(f"Smart selection {symbol}: zero stability score")
                 continue
             
-            # Hibrit skor (ağırlıklı)
+            # Hybrid score (weighted)
             total_score = (
-                liquidity_score * 0.5 +      # %50 - Likidite
-                stability_score * 0.3 +      # %30 - Stabilite
-                volume_pattern_score * 0.2   # %20 - Volume pattern
+                liquidity_score * 0.5 +      # 50% - Liquidity
+                stability_score * 0.3 +      # 30% - Stability
+                volume_pattern_score * 0.2   # 20% - Volume pattern
             )
             
             # Minimum threshold
-            if total_score >= 60:  # %60 minimum skor
+            if total_score >= 60:  # 60% minimum score
                 smart_candidates.append((symbol, total_score, liquidity_score, stability_score, volume_pattern_score))
                 self.logger.debug(
                     f"Smart score {symbol}: total={total_score:.1f}, "
@@ -391,26 +391,26 @@ class CoinFilter:
                     f"pattern={volume_pattern_score:.1f}"
                 )
         
-        # Skora göre sırala ve top N'i al
+        # Sort by score and get top N
         smart_candidates.sort(key=lambda x: x[1], reverse=True)
         selected = [symbol for symbol, total, liq, stab, pat in smart_candidates[:count]]
         
-        # Debug: Seçilen coinlerin skorlarını logla
+        # Debug: Log scores of selected coins
         for symbol, total, liq, stab, pat in smart_candidates[:count]:
             self.logger.debug(f"Selected {symbol}: total={total:.1f}, liq={liq:.1f}, stab={stab:.1f}, pat={pat:.1f}")
         
         return selected
     
     def _has_sufficient_data(self, symbol: str) -> bool:
-        """Coin'in analiz için yeterli verisi var mı kontrol eder."""
+        """Checks if coin has sufficient data for analysis."""
         try:
-            # 21 günlük veri kontrolü
+            # 21 days data check
             ohlcv_1d = self.exchange.fetch_ohlcv(symbol, '1d', limit=21)
             if len(ohlcv_1d) < 21:
                 self.logger.debug(f"Data sufficiency {symbol}: insufficient 1d data ({len(ohlcv_1d)} < 21)")
                 return False
             
-            # 24 saatlik veri kontrolü
+            # 24 hours data check
             ohlcv_1h = self.exchange.fetch_ohlcv(symbol, '1h', limit=24)
             if len(ohlcv_1h) < 24:
                 self.logger.debug(f"Data sufficiency {symbol}: insufficient 1h data ({len(ohlcv_1h)} < 24)")
@@ -422,42 +422,42 @@ class CoinFilter:
             return False
     
     def _get_quick_candidates(self, tickers: Dict, limit: int) -> List[tuple]:
-        """Hızlı filtreleme ile top N candidate'ı al."""
+        """Get top N candidates with quick filtering."""
         candidates = []
         
         for symbol, ticker in tickers.items():
-            # Futures sembol formatını normalize et
+            # Normalize futures symbol format
             normalized_symbol = symbol.replace(':USDT', '').replace(':USDC', '')
             
-            # Temel filtreler (OHLCV çekmeden)
+            # Basic filters (without fetching OHLCV)
             if not self._passes_quick_filters(normalized_symbol, ticker):
                 continue
             
-            # Volume bazlı skor (hızlı)
+            # Volume based score (quick)
             volume_score = ticker.get('quoteVolume', 0)
             candidates.append((normalized_symbol, ticker, volume_score))
         
-        # Volume'a göre sırala ve top N'i al
+        # Sort by volume and get top N
         candidates.sort(key=lambda x: x[2], reverse=True)
         return [(symbol, ticker) for symbol, ticker, _ in candidates[:limit]]
     
     def _passes_quick_filters(self, symbol: str, ticker: Dict) -> bool:
-        """Hızlı filtreler (OHLCV çekmeden)."""
+        """Quick filters (without fetching OHLCV)."""
         if not symbol.endswith('/USDT'):
             return False
         
-        # Temel kontroller
+        # Basic checks
         has_volume = ticker.get('quoteVolume') is not None
         is_leveraged = self._is_leveraged_token(symbol)
         is_stablecoin = self._is_stablecoin(symbol)
         is_excluded = self._is_futures_excluded(symbol)
         is_dead_coin = self._is_dead_coin(symbol, ticker)
         
-        # Fiyat kontrolü
+        # Price check
         price = ticker.get('last', 0)
         is_price_healthy = self._is_price_healthy(price)
         
-        # Volume threshold (hızlı kontrol)
+        # Volume threshold (quick check)
         volume = ticker.get('quoteVolume', 0)
         has_min_volume = volume >= 1000000  # 1M USDT minimum
         
@@ -465,18 +465,18 @@ class CoinFilter:
                 not is_excluded and not is_dead_coin and is_price_healthy and has_min_volume)
     
     def _passes_basic_filters(self, symbol: str, ticker: Dict) -> bool:
-        """Temel filtreleri kontrol eder."""
+        """Checks basic filters."""
         if not symbol.endswith('/USDT'):
             return False
         
-        # Temel kontroller
+        # Basic checks
         has_volume = ticker.get('quoteVolume') is not None
         is_leveraged = self._is_leveraged_token(symbol)
         is_stablecoin = self._is_stablecoin(symbol)
         is_excluded = self._is_futures_excluded(symbol)
         is_dead_coin = self._is_dead_coin(symbol, ticker)
         
-        # Fiyat kontrolü
+        # Price check
         price = ticker.get('last', 0)
         is_price_healthy = self._is_price_healthy(price)
         
@@ -484,19 +484,19 @@ class CoinFilter:
                 not is_excluded and not is_dead_coin and is_price_healthy)
     
     def _is_price_healthy(self, price: float) -> bool:
-        """Sağlıklı fiyat aralığı kontrolü."""
-        # Tüm fiyat limitleri kaldırıldı: Fiyat, coin kalitesinin göstergesi değildir.
-        # Likidite, stabilite ve volume pattern skorları zaten yeterli filtreleme sağlıyor.
-        # Eski limitler:
-        #   - Alt limit: if price < 0.01: return False (çok düşük fiyatlı coinler)
-        #   - Üst limit: if price > 50000: return False (BTC, ETH vb. yüksek fiyatlı coinler)
+        """Healthy price range check."""
+        # All price limits removed: Price is not an indicator of coin quality.
+        # Liquidity, stability and volume pattern scores already provide sufficient filtering.
+        # Old limits:
+        #   - Lower limit: if price < 0.01: return False (very low priced coins)
+        #   - Upper limit: if price > 50000: return False (BTC, ETH etc. high priced coins)
         # 
-        # Pump&dump riski volume, stability ve dead_coin kontrolleri ile filtreleniyor.
+        # Pump&dump risk is filtered by volume, stability and dead_coin checks.
         
         return True
     
     def _analyze_volume_pattern(self, symbol: str) -> float:
-        """Volume pattern analizi (%20 ağırlık)."""
+        """Volume pattern analysis (20% weight)."""
         try:
             ohlcv_1h = self.exchange.fetch_ohlcv(symbol, '1h', limit=48)
             
@@ -504,8 +504,8 @@ class CoinFilter:
                 self.logger.debug(f"Volume pattern {symbol}: insufficient data ({len(ohlcv_1h)} hours < 24)")
                 return 0
             
-            # Binance futures OHLCV volume'u base (contract) biriminde döndürüyor.
-            # Her mum için ortalama fiyatla çarparak quote (USDT) cinsine dönüştür.
+            # Binance futures OHLCV returns volume in base (contract) unit.
+            # Convert to quote (USDT) by multiplying with average price for each candle.
             quote_volumes = []
             for candle in ohlcv_1h:
                 base_volume = candle[5]
@@ -522,17 +522,17 @@ class CoinFilter:
                 self.logger.debug(f"Volume pattern {symbol}: zero quote volume after conversion")
                 return 0
             
-            # Volume trend analizi (USDT cinsinden)
-            recent_avg = sum(quote_volumes[-12:]) / 12  # Son 12 saat
-            older_avg = sum(quote_volumes[-24:-12]) / 12  # Önceki 12 saat
+            # Volume trend analysis (in USDT)
+            recent_avg = sum(quote_volumes[-12:]) / 12  # Last 12 hours
+            older_avg = sum(quote_volumes[-24:-12]) / 12  # Previous 12 hours
             
-            # Volume artış trendi (normalize edilmiş)
+            # Volume increase trend (normalized)
             volume_trend_raw = (recent_avg - older_avg) / older_avg if older_avg > 0 else 0
             
-            # Volume trend'i normalize et (-1 ile +1 arasında, sonra 0-1'e çevir)
-            volume_trend_normalized = max(0, min(1, (volume_trend_raw + 1) / 2))  # 0-1 aralığına çevir ve sınırla
+            # Normalize volume trend (between -1 and +1, then convert to 0-1)
+            volume_trend_normalized = max(0, min(1, (volume_trend_raw + 1) / 2))  # Convert to 0-1 range and limit
             
-            # Volume tutarlılığı (düşük std = iyi)
+            # Volume consistency (low std = good)
             mean_volume = np.mean(quote_volumes)
             if mean_volume > 0:
                 volume_consistency = 1 / (1 + np.std(quote_volumes) / mean_volume)
@@ -551,18 +551,18 @@ class CoinFilter:
             return pattern_score
             
         except Exception as e:
-            self.logger.debug(f"Volume pattern hatası {symbol}: {e}")
+            self.logger.debug(f"Volume pattern error {symbol}: {e}")
             return 0
     
     def _get_futures_fallback_coins(self, count: int) -> List[str]:
         """
-        Futures hata durumunda fallback coin listesi.
+        Fallback coin list in case of Futures error.
         
         Args:
-            count: İstenen coin sayısı
+            count: Number of coins requested
             
         Returns:
-            Varsayılan futures coin listesi
+            Default futures coin list
         """
         fallback = [
             'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT',
@@ -572,18 +572,18 @@ class CoinFilter:
             'ALGO/USDT', 'VET/USDT', 'FIL/USDT', 'TRX/USDT'
         ]
         
-        self.logger.warning("Futures fallback coin listesi kullanılıyor")
+        self.logger.warning("Using futures fallback coin list")
         return fallback[:count]
 
     def _get_fallback_coins(self, count: int) -> List[str]:
         """
-        Hata durumunda fallback coin listesi döndürür.
+        Returns fallback coin list in case of error.
         
         Args:
-            count: İstenen coin sayısı
+            count: Number of coins requested
             
         Returns:
-            Varsayılan major coin listesi
+            Default major coin list
         """
         fallback = [
             'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT',
@@ -593,6 +593,6 @@ class CoinFilter:
             'ALGO/USDT', 'VET/USDT', 'FIL/USDT', 'TRX/USDT'
         ]
         
-        self.logger.warning("Fallback coin listesi kullanılıyor")
+        self.logger.warning("Using fallback coin list")
         return fallback[:count]
 

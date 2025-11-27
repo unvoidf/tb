@@ -19,7 +19,8 @@ def temp_db():
     # Cleanup
     try:
         os.unlink(path)
-    except:
+    except OSError as e:
+        # Cleanup failed, file may already be deleted
         pass
 
 

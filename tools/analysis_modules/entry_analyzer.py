@@ -255,7 +255,7 @@ class EntryAnalyzer:
                     # Check if this signal hit SL
                     if sig.get('sl_hit'):
                         repeated_signals_sl.append(sig)
-            except:
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
                 continue
         
         if len(repeated_signals_sl) < 3:

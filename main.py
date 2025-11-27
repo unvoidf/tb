@@ -32,7 +32,7 @@ class TrendBot:
             frame: Frame object
         """
         if self.logger:
-            self.logger.info(f"Signal {signum} received, shutting down application...")
+            self.logger.log_info(f"Signal {signum} received, shutting down application...")
         
         self.shutdown()
         sys.exit(0)
@@ -49,9 +49,9 @@ class TrendBot:
             # Get Logger
             self.logger = self.components['logger']
             
-            self.logger.info("=" * 50)
-            self.logger.info("Starting TrendBot")
-            self.logger.info("=" * 50)
+            self.logger.log_info("=" * 50)
+            self.logger.log_info("Starting TrendBot")
+            self.logger.log_info("=" * 50)
             
             # Initialize Bot
             self.components['telegram_bot'].initialize()
@@ -65,7 +65,7 @@ class TrendBot:
             # Start Signal tracker scheduler
             self.components['signal_tracker_scheduler'].start()
             
-            self.logger.info("All components initialized successfully")
+            self.logger.log_info("All components initialized successfully")
             
         except Exception as e:
             error_msg = f"Application initialization error: {str(e)}"
@@ -80,10 +80,10 @@ class TrendBot:
             raise TrendBotException("Application not initialized")
         
         try:
-            self.logger.info("Running TrendBot...")
+            self.logger.log_info("Running TrendBot...")
             self.components['telegram_bot'].run()
         except KeyboardInterrupt:
-            self.logger.info("Stopped by user")
+            self.logger.log_info("Stopped by user")
         except Exception as e:
             error_msg = f"Bot execution error: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
@@ -98,7 +98,7 @@ class TrendBot:
             if self.components and 'config' in self.components:
                 ch_id = self.components['config'].telegram_channel_id
                 msg = "🛑 Bot is shutting down"
-                self.logger.info(msg)
+                self.logger.log_info(msg)
                 # PTB might be closed; send directly via Telegram HTTP API
                 try:
                     import json as _json, urllib.request as _urlreq
@@ -108,7 +108,7 @@ class TrendBot:
                     req = _urlreq.Request(api_url, data=payload, headers={'Content-Type': 'application/json'})
                     _urlreq.urlopen(req, timeout=5)
                     if self.logger:
-                        self.logger.info("Channel message sent (pre-shutdown, direct API)")
+                        self.logger.log_info("Channel message sent (pre-shutdown, direct API)")
                 except Exception as http_err:
                     if self.logger:
                         self.logger.error(f"Pre-shutdown direct API error: {http_err}")
@@ -119,7 +119,7 @@ class TrendBot:
             try:
                 self.components['scheduler'].stop()
                 if self.logger:
-                    self.logger.info("Scheduler stopped")
+                    self.logger.log_info("Scheduler stopped")
             except Exception as e:
                 if self.logger:
                     self.logger.error(f"Scheduler stop error: {str(e)}")
@@ -128,7 +128,7 @@ class TrendBot:
             try:
                 self.components['signal_scanner_scheduler'].stop()
                 if self.logger:
-                    self.logger.info("Signal scanner scheduler stopped")
+                    self.logger.log_info("Signal scanner scheduler stopped")
             except Exception as e:
                 if self.logger:
                     self.logger.error(f"Signal scanner scheduler stop error: {str(e)}")
@@ -137,13 +137,13 @@ class TrendBot:
             try:
                 self.components['signal_tracker_scheduler'].stop()
                 if self.logger:
-                    self.logger.info("Signal tracker scheduler stopped")
+                    self.logger.log_info("Signal tracker scheduler stopped")
             except Exception as e:
                 if self.logger:
                     self.logger.error(f"Signal tracker scheduler stop error: {str(e)}")
         
         if self.logger:
-            self.logger.info("TrendBot shut down")
+            self.logger.log_info("TrendBot shut down")
 
 
 def main():

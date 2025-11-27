@@ -599,7 +599,8 @@ class SignalGenerator:
                 volatility_percentile = (rolling_std.rank(pct=True).iloc[-1]) * 100
             else:
                 volatility_percentile = 50.0
-        except:
+        except Exception as e:
+            self.logger.debug(f"Volatility percentile calculation failed: {e}")
             volatility_percentile = 50.0
         
         # Price changes hesapla
@@ -611,7 +612,8 @@ class SignalGenerator:
                 price_changes['last_4_candles'] = ((df['close'].iloc[-1] / df['close'].iloc[-5]) - 1) * 100 if len(df) >= 5 else 0
             if len(df) >= 24:
                 price_changes['last_24_candles'] = ((df['close'].iloc[-1] / df['close'].iloc[-25]) - 1) * 100 if len(df) >= 25 else 0
-        except:
+        except Exception as e:
+            self.logger.debug(f"Price changes calculation failed: {e}")
             price_changes = {'last_1_candle': 0, 'last_4_candles': 0, 'last_24_candles': 0}
         
         # EMA trend

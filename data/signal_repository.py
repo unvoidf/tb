@@ -158,20 +158,20 @@ class SignalRepository(BaseRepository):
             self.logger.error(f"Signal save error: {str(e)}", exc_info=True)
             return False
     
-    def _prepare_signal_kwargs_from_dict(self, data: Dict) -> Dict:
+    def _prepare_signal_kwargs_from_dict(self, signal_dict: Dict) -> Dict:
         """
         Normalizes legacy dict payloads (used by tests and scripts) into the keyword
         arguments expected by save_signal.
         """
-        symbol = data.get('symbol')
-        signal_id = data.get('signal_id') or (symbol and self.generate_signal_id(symbol)) or self.generate_signal_id('UNKNOWN')
-        signal_data = data.get('signal_data', data)
-        entry_levels = data.get('entry_levels', {})
+        symbol = signal_dict.get('symbol')
+        signal_id = signal_dict.get('signal_id') or (symbol and self.generate_signal_id(symbol)) or self.generate_signal_id('UNKNOWN')
+        signal_data = signal_dict.get('signal_data', signal_dict)
+        entry_levels = signal_dict.get('entry_levels', {})
         
         # Extract TP/SL from custom_targets if not provided directly (Mean Reversion signals)
-        tp1_price = data.get('tp1_price')
-        tp2_price = data.get('tp2_price')
-        sl_price = data.get('sl_price')
+        tp1_price = signal_dict.get('tp1_price')
+        tp2_price = signal_dict.get('tp2_price')
+        sl_price = signal_dict.get('sl_price')
         
         # Check signal_data for custom_targets
         custom_targets = signal_data.get('custom_targets', {})
@@ -194,25 +194,25 @@ class SignalRepository(BaseRepository):
         return {
             'signal_id': signal_id,
             'symbol': symbol,
-            'direction': data.get('direction', 'NEUTRAL'),
-            'signal_price': data.get('signal_price', 0.0),
-            'confidence': data.get('confidence', 0.0),
-            'atr': data.get('atr'),
-            'timeframe': data.get('timeframe'),
-            'telegram_message_id': data.get('telegram_message_id', 0),
-            'telegram_channel_id': data.get('telegram_channel_id', ''),
+            'direction': signal_dict.get('direction', 'NEUTRAL'),
+            'signal_price': signal_dict.get('signal_price', 0.0),
+            'confidence': signal_dict.get('confidence', 0.0),
+            'atr': signal_dict.get('atr'),
+            'timeframe': signal_dict.get('timeframe'),
+            'telegram_message_id': signal_dict.get('telegram_message_id', 0),
+            'telegram_channel_id': signal_dict.get('telegram_channel_id', ''),
             'tp1_price': tp1_price,
             'tp2_price': tp2_price,
             'sl_price': sl_price,
             'signal_data': signal_data,
             'entry_levels': entry_levels,
-            'signal_score_breakdown': data.get('score_breakdown'),
-            'market_context': data.get('market_context'),
-            'tp1_distance_r': data.get('tp1_distance_r', data.get('tp1_r')),
-            'tp2_distance_r': data.get('tp2_distance_r', data.get('tp2_r')),
-            'sl_distance_r': data.get('sl_distance_r', data.get('sl_r')),
-            'optimal_entry_price': data.get('optimal_entry_price'),
-            'conservative_entry_price': data.get('conservative_entry_price')
+            'signal_score_breakdown': signal_dict.get('score_breakdown'),
+            'market_context': signal_dict.get('market_context'),
+            'tp1_distance_r': signal_dict.get('tp1_distance_r', signal_dict.get('tp1_r')),
+            'tp2_distance_r': signal_dict.get('tp2_distance_r', signal_dict.get('tp2_r')),
+            'sl_distance_r': signal_dict.get('sl_distance_r', signal_dict.get('sl_r')),
+            'optimal_entry_price': signal_dict.get('optimal_entry_price'),
+            'conservative_entry_price': signal_dict.get('conservative_entry_price')
         }
     
     def get_signal(self, signal_id: str) -> Optional[Dict]:
@@ -941,16 +941,16 @@ class SignalRepository(BaseRepository):
         """
         try:
             if isinstance(symbol, dict):
-                data = symbol
+                signal_dict = symbol
                 return self.save_rejected_signal(
-                    symbol=data.get('symbol'),
-                    direction=data.get('direction'),
-                    confidence=data.get('confidence'),
-                    signal_price=data.get('signal_price', 0.0),
-                    rejection_reason=data.get('rejection_reason') or data.get('rejected_reason'),
-                    score_breakdown=data.get('score_breakdown'),
-                    market_context=data.get('market_context'),
-                    signal_id=data.get('signal_id')
+                    symbol=signal_dict.get('symbol'),
+                    direction=signal_dict.get('direction'),
+                    confidence=signal_dict.get('confidence'),
+                    signal_price=signal_dict.get('signal_price', 0.0),
+                    rejection_reason=signal_dict.get('rejection_reason') or signal_dict.get('rejected_reason'),
+                    score_breakdown=signal_dict.get('score_breakdown'),
+                    market_context=signal_dict.get('market_context'),
+                    signal_id=signal_dict.get('signal_id')
                 )
             
             with self.db.get_db_context() as conn:
@@ -1101,17 +1101,20 @@ class SignalRepository(BaseRepository):
                 if signal.get('signal_data'):
                     try:
                         signal['signal_data'] = json.loads(signal['signal_data'])
-                    except:
+                    except (json.JSONDecodeError, TypeError) as e:
+                        self.logger.debug(f"Failed to parse signal_data JSON: {e}")
                         pass
                 if signal.get('entry_levels'):
                     try:
                         signal['entry_levels'] = json.loads(signal['entry_levels'])
-                    except:
+                    except (json.JSONDecodeError, TypeError) as e:
+                        self.logger.debug(f"Failed to parse entry_levels JSON: {e}")
                         pass
                 if signal.get('signal_log'):
                     try:
                         signal['signal_log'] = json.loads(signal['signal_log'])
-                    except:
+                    except (json.JSONDecodeError, TypeError) as e:
+                        self.logger.debug(f"Failed to parse signal_log JSON: {e}")
                         pass
                 signals.append(signal)
             

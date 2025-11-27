@@ -247,20 +247,20 @@ class ReportGenerator:
                 self.console.print(f"   {rec['details']}")
                 self.console.print(f"   [green]→[/green] {rec['action']}")
     
-    def export_to_json(self, data: Dict, filename: str) -> None:
+    def export_to_json(self, export_data: Dict, filename: str) -> None:
         """Exports analysis results to JSON."""
         with open(filename, 'w') as f:
-            json.dump(data, f, indent=2, default=str)
+            json.dump(export_data, f, indent=2, default=str)
         self.console.print(f"\n[green]✅ Exported to {filename}[/green]")
     
-    def export_to_csv(self, data: List[Dict], filename: str) -> None:
+    def export_to_csv(self, export_records: List[Dict], filename: str) -> None:
         """Exports data to CSV."""
-        if not data:
+        if not export_records:
             return
         
         with open(filename, 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=data[0].keys())
+            writer = csv.DictWriter(f, fieldnames=export_records[0].keys())
             writer.writeheader()
-            writer.writerows(data)
+            writer.writerows(export_records)
         
         self.console.print(f"\n[green]✅ Exported to {filename}[/green]")

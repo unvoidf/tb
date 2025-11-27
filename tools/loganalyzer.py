@@ -46,7 +46,8 @@ class LogAnalyzer:
         if match:
             try:
                 return datetime.strptime(match.group(1), '%Y-%m-%d %H:%M:%S')
-            except:
+            except ValueError as e:
+                # Invalid datetime format
                 return None
         return None
     
@@ -195,7 +196,8 @@ class LogAnalyzer:
             if rsi_match: self.indicator_stats['RSI'].append(float(rsi_match.group(1)))
             if adx_match: self.indicator_stats['ADX'].append(float(adx_match.group(1)))
             if vol_match: self.indicator_stats['VOL'].append(float(vol_match.group(1)))
-        except:
+        except (ValueError, AttributeError) as e:
+            # Failed to parse indicator values
             pass
 
     def _extract_signal_info(self, line: str, accepted: bool = True) -> Optional[Dict]:

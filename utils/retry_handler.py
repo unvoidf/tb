@@ -85,8 +85,10 @@ class RetryHandler:
             Decorated function
         """
         def decorator(func: Callable) -> Callable:
+            """Decorator that adds retry logic to the function."""
             @wraps(func)
             def wrapper(*args, **kwargs) -> Any:
+                """Wrapper function that executes the function with retries."""
                 last_exception = None
                 
                 for attempt in range(1, max_attempts + 1):

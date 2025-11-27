@@ -51,7 +51,7 @@ def load_and_analyze():
                 ctx['confidence'] = row['confidence']
                 ctx['direction'] = row['direction']
                 market_data.append(ctx)
-            except:
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
                 pass
     
     if market_data:
@@ -129,7 +129,7 @@ def load_and_analyze():
                 print(f"  ADX Strength:      {ctx.get('adx_strength', 'N/A')}")
                 print(f"  Volatility %ile:   {ctx.get('volatility_percentile', 'N/A'):.1f}")
                 print(f"  24h Change:        {ctx.get('price_change_24h_pct', 'N/A'):.2f}%")
-            except:
+            except (json.JSONDecodeError, TypeError, KeyError, ValueError) as e:
                 print(f"  Market Context:    Error parsing")
     
     print()

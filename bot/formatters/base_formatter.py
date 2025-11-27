@@ -167,6 +167,7 @@ class BaseFormatter:
         
         # Bold pattern: *text* (single asterisk for MarkdownV2)
         def bold_replacer(match):
+            """Replaces bold pattern with placeholder for markdown escaping."""
             unique_id = str(uuid.uuid4())[:8]
             placeholder = f"__BOLD_{unique_id}__"
             content = match.group(1)
@@ -176,6 +177,7 @@ class BaseFormatter:
         
         # Italic pattern: _text_ (but not inside *)
         def italic_replacer(match):
+            """Replaces italic pattern with placeholder for markdown escaping."""
             unique_id = str(uuid.uuid4())[:8]
             placeholder = f"__ITALIC_{unique_id}__"
             content = match.group(1)

@@ -1,6 +1,6 @@
 """
-HourlyAnalyzer: Saatlik analiz yapan bileşen.
-Top coinleri analiz eder ve sinyal üretir.
+HourlyAnalyzer: Hourly analysis component.
+Analyzes top coins and generates signals.
 """
 from typing import List, Dict
 from utils.logger import LoggerManager
@@ -11,11 +11,11 @@ from data.market_data_manager import MarketDataManager
 
 
 class HourlyAnalyzer:
-    """Saatlik analiz yapan bileşen."""
+    """Hourly analysis component."""
     
     def __init__(self, coin_filter: CoinFilter, market_data: MarketDataManager, signal_generator: SignalGenerator):
         """
-        HourlyAnalyzer'ı başlatır.
+        Initializes HourlyAnalyzer.
         
         Args:
             coin_filter: Coin filter
@@ -29,30 +29,30 @@ class HourlyAnalyzer:
     
     def analyze_top_coins(self, top_count: int = 20) -> List[Dict]:
         """
-        Top coinleri analiz eder.
+        Analyzes top coins.
         
         Args:
-            top_count: Analiz edilecek coin sayısı
+            top_count: Number of coins to analyze
             
         Returns:
-            Analiz sonuçları listesi
+            List of analysis results
         """
         try:
-            self.logger.info(f"Top {top_count} coin analiz ediliyor")
+            self.logger.info(f"Analyzing top {top_count} coins")
             
-            # Top hacimli coinleri al
+            # Get top volume coins
             symbols = self.coin_filter.get_top_volume_coins(top_count)
             
             if not symbols:
-                self.logger.warning("Coin listesi alınamadı")
+                self.logger.warning("Coin list could not be retrieved")
                 return []
             
-            # Her coin için sinyal üret
+            # Generate signal for each coin
             all_signals = []
             
             for symbol in symbols:
                 try:
-                    # Multi-timeframe veri çek
+                    # Fetch multi-timeframe data
                     timeframes = ['1h', '4h', '1d']
                     multi_tf_data = self.market_data.fetch_multi_timeframe(symbol, timeframes)
                     
@@ -67,11 +67,11 @@ class HourlyAnalyzer:
                             'signal': signal_data
                         })
                 except Exception as e:
-                    self.logger.error(f"{symbol} analiz hatası: {str(e)}")
+                    self.logger.error(f"{symbol} analysis error: {str(e)}")
             
-            self.logger.info(f"Toplam {len(all_signals)} coin analiz edildi")
+            self.logger.info(f"Total {len(all_signals)} coins analyzed")
             return all_signals
             
         except Exception as e:
-            self.logger.error(f"Saatlik analiz hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Hourly analysis error: {str(e)}", exc_info=True)
             return []

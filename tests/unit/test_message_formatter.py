@@ -3,6 +3,7 @@ import pytest
 from bot.message_formatter import MessageFormatter
 
 def test_format_signal_alert_simulation(mocker):
+    """Tests format_signal_alert method with simulated signal data."""
     mocker.patch('bot.message_formatter.LoggerManager')
     formatter = MessageFormatter()
 
@@ -70,6 +71,7 @@ def test_format_signal_alert_simulation(mocker):
 
 
 def test_escape_handles_plus_inside_bold(mocker):
+    """Tests that markdown escape correctly handles plus sign inside bold text."""
     mocker.patch('bot.message_formatter.LoggerManager')
     formatter = MessageFormatter()
     

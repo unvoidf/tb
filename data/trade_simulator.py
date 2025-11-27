@@ -2,6 +2,15 @@
 import sqlite3
 
 def simulate_trades():
+    """
+    Simulates trades based on historical signals from database.
+    
+    Loads signals from signals.db, simulates trade execution with stop-loss,
+    and calculates final capital based on TP/SL hits.
+    
+    Returns:
+        Prints initial capital, final capital, and profit/loss to console
+    """
     initial_capital = 100.0
     capital = initial_capital
     stop_loss_pct = 0.05

@@ -352,7 +352,7 @@ class LoggerManager:
             handler.close()
             self.logger.removeHandler(handler)
     
-    def info(self, message: str) -> None:
+    def log_info(self, message: str) -> None:
         """Log record at Info level."""
         self.logger.info(message)
     

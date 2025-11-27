@@ -7,6 +7,7 @@ from scheduler.components.signal_scanner_manager import SignalScannerManager
 
 @pytest.fixture(autouse=True)
 def mock_logger(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mocks LoggerManager to prevent file I/O during tests."""
     from utils import logger as logger_module
 
     monkeypatch.setattr(logger_module.LoggerManager, "_instance", None)
@@ -44,6 +45,7 @@ def _build_manager(repository: MagicMock) -> SignalScannerManager:
 
 
 def test_cache_warmup_populates_cache() -> None:
+    """Tests that cache is populated from database during warmup."""
     repo = MagicMock()
     repo.get_recent_signal_summaries.return_value = [
         {
@@ -65,6 +67,7 @@ def test_cache_warmup_populates_cache() -> None:
 
 
 def test_should_send_notification_uses_db_when_cache_empty() -> None:
+    """Tests that manager queries database when cache is empty."""
     repo = MagicMock()
     repo.get_recent_signal_summaries.return_value = []
 
@@ -90,6 +93,7 @@ def test_should_send_notification_uses_db_when_cache_empty() -> None:
 
 
 def test_should_send_notification_blocks_when_active_signal_exists() -> None:
+    """Tests that new signals are blocked when active signal exists for symbol."""
     repo = MagicMock()
     repo.get_recent_signal_summaries.return_value = []
 
@@ -113,6 +117,7 @@ def test_should_send_notification_blocks_when_active_signal_exists() -> None:
 
 
 def test_should_send_notification_neutral_direction() -> None:
+    """Tests that NEUTRAL direction signals are always rejected."""
     repo = MagicMock()
     repo.get_recent_signal_summaries.return_value = []
 
@@ -126,6 +131,7 @@ def test_should_send_notification_neutral_direction() -> None:
 
 
 def test_neutral_signal_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests that NEUTRAL signals do not trigger telegram notifications."""
     repo = MagicMock()
     repo.get_recent_signal_summaries.return_value = []
     repo.get_latest_active_signal_by_symbol.return_value = None
@@ -134,6 +140,7 @@ def test_neutral_signal_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
     manager.market_data.get_latest_price.return_value = 100.0
     
     def fake_generate_signal(multi_tf_data, symbol=None, return_reason=False):
+        """Returns a NEUTRAL signal for testing."""
         return {
             "direction": "NEUTRAL",
             "confidence": 0.75,

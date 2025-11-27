@@ -156,7 +156,7 @@ class SimulationEngine:
         if isinstance(signal_data, str):
             try:
                 signal_data = json.loads(signal_data)
-            except:
+            except (json.JSONDecodeError, TypeError) as e:
                 signal_data = {}
         elif not isinstance(signal_data, dict):
             signal_data = {}

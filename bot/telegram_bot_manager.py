@@ -652,6 +652,7 @@ class TelegramBotManager:
             # update_message_for_signal is a sync method, so we must run it in a thread
             import threading
             def update_signal():
+                """Updates signal message in background thread."""
                 try:
                     signal_tracker.update_message_for_signal(signal)
                     self.logger.info(f"Signal update completed: {signal_id}")

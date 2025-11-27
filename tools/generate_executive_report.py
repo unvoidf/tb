@@ -163,7 +163,8 @@ class ExecutiveReportGenerator:
                     ctx['outcome'] = 'win' if row['tp1_hit'] else ('loss' if row['sl_hit'] else 'active')
                     ctx['symbol'] = row['symbol']
                     contexts.append(ctx)
-                except:
+                except (json.JSONDecodeError, TypeError, KeyError) as e:
+                    # Skip malformed context data
                     pass
         
         if not contexts:
@@ -441,7 +442,7 @@ class ExecutiveReportGenerator:
                 if pd.notna(row.get('market_context')):
                     try:
                         ctx = json.loads(row['market_context']) if isinstance(row['market_context'], str) else row['market_context']
-                    except:
+                    except (json.JSONDecodeError, TypeError) as e:
                         pass
                 
                 regime = ctx.get('regime', 'N/A')
@@ -469,7 +470,7 @@ class ExecutiveReportGenerator:
                 if pd.notna(row.get('market_context')):
                     try:
                         ctx = json.loads(row['market_context']) if isinstance(row['market_context'], str) else row['market_context']
-                    except:
+                    except (json.JSONDecodeError, TypeError) as e:
                         pass
                 
                 regime = ctx.get('regime', 'N/A')
@@ -725,7 +726,7 @@ class ExecutiveReportGenerator:
                         ctx = json.loads(row.get('market_context', '{}')) if pd.notna(row.get('market_context')) else {}
                         if ctx.get('price_change_24h_pct', 0) > 0 and row['direction'] == 'SHORT':
                             counter_trend += 1
-                    except:
+                    except (json.JSONDecodeError, TypeError, KeyError) as e:
                         pass
                 
                 if counter_trend > 0:

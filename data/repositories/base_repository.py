@@ -1,6 +1,6 @@
 """
-BaseRepository: Repository helper metodları.
-JSON temizleme ve row-to-dict dönüşüm fonksiyonları.
+BaseRepository: Repository helper methods.
+JSON cleaning and row-to-dict conversion functions.
 """
 import json
 import sqlite3
@@ -9,45 +9,45 @@ from utils.logger import LoggerManager
 
 
 class BaseRepository:
-    """Repository için temel helper sınıfı."""
+    """Base helper class for repositories."""
     
     def __init__(self):
         self.logger = LoggerManager().get_logger('BaseRepository')
     
     def clean_for_json(self, obj):
         """
-        Dict'i JSON serialization için temizler.
-        Numpy/pandas bool, int, float'ları Python native tiplerine çevirir.
+        Cleans dict for JSON serialization.
+        Converts Numpy/pandas bool, int, float to Python native types.
         
         Args:
-            obj: Temizlenecek obje (dict, list, veya primitive)
+            obj: Object to clean (dict, list, or primitive)
             
         Returns:
-            Temizlenmiş obje
+            Cleaned object
         """
         if isinstance(obj, dict):
             return {key: self.clean_for_json(value) for key, value in obj.items()}
         elif isinstance(obj, list):
             return [self.clean_for_json(item) for item in obj]
         elif isinstance(obj, (bool, int, float, str, type(None))):
-            # Python native tipler zaten JSON serializable
+            # Python native types are already JSON serializable
             return obj
         else:
-            # Numpy/pandas tipleri Python native'e çevir
+            # Convert Numpy/pandas types to Python native
             try:
                 import numpy as np
-                # Numpy bool tipleri (np.bool8 yeni versiyonlarda yok)
+                # Numpy bool types (np.bool8 is missing in new versions)
                 if isinstance(obj, np.bool_):
                     return bool(obj)
-                # Numpy bool8 kontrolü (eski versiyonlar için)
+                # Numpy bool8 check (for older versions)
                 if hasattr(np, 'bool8') and isinstance(obj, np.bool8):
                     return bool(obj)
-                # Numpy integer tipleri
+                # Numpy integer types
                 if isinstance(obj, (np.integer, np.int_, np.intc, np.intp, np.int8,
                                      np.int16, np.int32, np.int64, np.uint8, np.uint16,
                                      np.uint32, np.uint64)):
                     return int(obj)
-                # Numpy floating tipleri
+                # Numpy floating types
                 if isinstance(obj, (np.floating, np.float_, np.float16, np.float32, np.float64)):
                     return float(obj)
                 # Numpy array
@@ -56,7 +56,7 @@ class BaseRepository:
             except (ImportError, AttributeError):
                 pass
             
-            # Pandas tipleri
+            # Pandas types
             try:
                 import pandas as pd
                 if isinstance(obj, pd.Series):
@@ -66,12 +66,12 @@ class BaseRepository:
             except ImportError:
                 pass
             
-            # Son çare: string'e çevir
+            # Last resort: convert to string
             return str(obj)
     
     def row_to_dict(self, row: sqlite3.Row) -> Dict:
         """
-        SQLite Row'u dict'e çevirir.
+        Converts SQLite Row to dict.
         
         Args:
             row: SQLite Row
@@ -81,7 +81,7 @@ class BaseRepository:
         """
         result = dict(row)
         
-        # JSON string'leri parse et
+        # Parse JSON strings
         if result.get('signal_data'):
             try:
                 result['signal_data'] = json.loads(result['signal_data'])

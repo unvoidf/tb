@@ -1,6 +1,6 @@
 """
-SignalTracker: TP/SL seviyelerini takip eden ve mesajları güncelleyen sınıf.
-Aktif sinyalleri kontrol eder, TP/SL hit durumlarını günceller ve Telegram mesajlarını düzenler.
+SignalTracker: Class that tracks TP/SL levels and updates messages.
+Checks active signals, updates TP/SL hit statuses, and manages Telegram messages.
 """
 import time
 from typing import Dict, Optional
@@ -13,7 +13,7 @@ from tools.archiver import SignalArchiver
 
 
 class SignalTracker:
-    """TP/SL seviyelerini takip eder ve mesajları günceller."""
+    """Tracks TP/SL levels and updates messages."""
     
     def __init__(
         self,
@@ -25,22 +25,22 @@ class SignalTracker:
         message_update_delay: float = 0.6
     ):
         """
-        SignalTracker'ı başlatır.
+        Initializes SignalTracker.
         
         Args:
             signal_repository: Signal repository
             market_data: Market data manager
             bot_manager: Telegram bot manager
             message_formatter: Message formatter
-            message_update_delay: Mesaj güncellemeleri arası minimum bekleme süresi (saniye, default: 0.6)
+            message_update_delay: Minimum wait time between message updates (seconds, default: 0.6)
         """
         self.repository = signal_repository
         self.market_data = market_data
         self.bot_manager = bot_manager
         self.formatter = message_formatter
         self.liquidation_safety_filter = liquidation_safety_filter
-        # Mesaj güncellemeleri arası minimum bekleme süresi (Telegram rate limit için)
-        # Varsayılan 0.6 saniye (Telegram'ın flood control'üne takılmamak için)
+        # Minimum wait time between message updates (for Telegram rate limit)
+        # Default 0.6 seconds (to avoid Telegram flood control)
         self.message_update_delay = message_update_delay if message_update_delay > 0 else 0.6
         self.logger = LoggerManager().get_logger('SignalTracker')
         self._last_update_time = 0.0
@@ -49,10 +49,10 @@ class SignalTracker:
         self.message_check_interval = 600  # 10 minutes
         self.archive_check_interval = 600  # 10 minutes
         
-        # Mesaj güncelleme kontrolü için threshold'lar
-        self.mfe_mae_update_threshold_pct = 2.0  # MFE/MAE %2 değişiminde güncelle
-        self.hit_signal_update_interval = 7200  # Hit olmuş sinyaller için 2 saatte bir güncelle
-        self.confidence_change_threshold = 0.05  # Confidence %5 değişiminde güncelle
+        # Thresholds for message update check
+        self.mfe_mae_update_threshold_pct = 2.0  # Update on 2% MFE/MAE change
+        self.hit_signal_update_interval = 7200  # Update every 2 hours for hit signals
+        self.confidence_change_threshold = 0.05  # Update on 5% confidence change
         
         # Initialize Archiver
         # We use the same DB path from the repository
@@ -65,7 +65,7 @@ class SignalTracker:
         direction: str,
         is_tp: bool
     ) -> Optional[float]:
-        """Hedef ve mevcut fiyat arasındaki farkı (hedefe kalan) hesaplar."""
+        """Calculates difference between target and current price (remaining to target)."""
         if target_price is None or current_price is None:
             return None
 
@@ -89,7 +89,7 @@ class SignalTracker:
         direction: str,
         is_tp: bool
     ) -> Optional[float]:
-        """Hedefe kalan yüzdeyi hesaplar."""
+        """Calculates percentage remaining to target."""
         if target_price is None or current_price in (None, 0):
             return None
 
@@ -105,13 +105,13 @@ class SignalTracker:
         current_price: float,
         direction: str
     ) -> None:
-        """Sinyalin güncel durumunu detaylı şekilde loglar."""
+        """Logs signal current status in detail."""
         signal_id = signal.get('signal_id', 'unknown')
         symbol = signal.get('symbol', 'unknown')
         signal_price = signal.get('signal_price')
 
         self.logger.info(
-            "Sinyal takibi başlatıldı: id=%s symbol=%s direction=%s signal_price=%.6f current_price=%.6f",
+            "Signal tracking started: id=%s symbol=%s direction=%s signal_price=%.6f current_price=%.6f",
             signal_id,
             symbol,
             direction,
@@ -129,11 +129,11 @@ class SignalTracker:
             remaining_pct = self._calculate_percentage_to_target(tp_price, current_price, direction, is_tp=True)
 
             self.logger.debug(
-                "%s TP%d: hedef=%.6f durum=%s fiyat_farkı=%s kalan_yüzde=%s",
+                "%s TP%d: target=%.6f status=%s price_diff=%s remaining_pct=%s",
                 signal_id,
                 tp_level,
                 tp_price,
-                "HIT" if tp_hit else "BEKLEMEDE",
+                "HIT" if tp_hit else "PENDING",
                 "N/A" if price_diff is None else f"{price_diff:.6f}",
                 "N/A" if remaining_pct is None else f"{remaining_pct:.2f}%"
             )
@@ -145,51 +145,51 @@ class SignalTracker:
             remaining_pct = self._calculate_percentage_to_target(sl_price, current_price, direction, is_tp=False)
 
             self.logger.debug(
-                "%s SL: hedef=%.6f durum=%s fiyat_farkı=%s kalan_yüzde=%s",
+                "%s SL: target=%.6f status=%s price_diff=%s remaining_pct=%s",
                 signal_id,
                 sl_price,
-                "HIT" if sl_hit else "BEKLEMEDE",
+                "HIT" if sl_hit else "PENDING",
                 "N/A" if price_diff is None else f"{price_diff:.6f}",
                 "N/A" if remaining_pct is None else f"{remaining_pct:.2f}%"
             )
 
     def check_all_active_signals(self) -> None:
         """
-        Tüm aktif sinyalleri kontrol eder ve gerekirse günceller.
+        Checks and updates all active signals if necessary.
         """
         try:
             active_signals = self.repository.get_active_signals()
             
             if not active_signals:
-                self.logger.debug("Aktif sinyal yok")
+                self.logger.debug("No active signals")
                 return
             
-            self.logger.info(f"{len(active_signals)} aktif sinyal kontrol ediliyor")
+            self.logger.info(f"{len(active_signals)} active signals being checked")
             
             for signal in active_signals:
                 try:
                     self.check_signal_levels(signal)
                 except Exception as e:
                     self.logger.error(
-                        f"Sinyal kontrolü hatası ({signal.get('signal_id', 'unknown')}): {str(e)}",
+                        f"Signal check error ({signal.get('signal_id', 'unknown')}): {str(e)}",
                         exc_info=True
                     )
             
-            # Periyodik mesaj kontrolü (Heartbeat)
+            # Periodic message check (Heartbeat)
             self.check_messages_existence(active_signals)
             
-            # Periyodik arşiv kontrolü (message_deleted=1 olan sinyalleri arşivle)
+            # Periodic archive check (archive signals with message_deleted=1)
             self.archive_deleted_signals()
                     
         except Exception as e:
-            self.logger.error(f"Aktif sinyal kontrolü hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Active signal check error: {str(e)}", exc_info=True)
     
     def check_signal_levels(self, signal: Dict) -> None:
         """
-        Tek bir sinyal için TP/SL seviyelerini kontrol eder.
+        Checks TP/SL levels for a single signal.
         
         Args:
-            signal: Sinyal dict (veritabanından gelen)
+            signal: Signal dict (from database)
         """
         try:
             signal_id = signal.get('signal_id')
@@ -198,18 +198,18 @@ class SignalTracker:
             signal_price = signal.get('signal_price')
             
             if not all([signal_id, symbol, direction, signal_price]):
-                self.logger.warning(f"Eksik sinyal bilgisi: {signal_id}")
+                self.logger.warning(f"Missing signal info: {signal_id}")
                 return
             
-            # Güncel fiyatı al
+            # Get current price
             current_price = self.market_data.get_latest_price(symbol)
             if not current_price:
-                self.logger.warning(f"{symbol} güncel fiyat alınamadı")
+                self.logger.warning(f"{symbol} current price could not be obtained")
                 return
 
             self._log_signal_snapshot(signal, current_price, direction)
             
-            # 1) SNAPSHOT KAYDET
+            # 1) SAVE SNAPSHOT
             self.repository.save_price_snapshot(
                 signal_id=signal_id,
                 timestamp=int(time.time()),
@@ -217,14 +217,14 @@ class SignalTracker:
                 source='tracker_tick'
             )
             
-            # 2) MFE/MAE GÜNCELLE
-            # Önce eski değerleri sakla (threshold kontrolü için)
+            # 2) UPDATE MFE/MAE
+            # Store old values first (for threshold check)
             old_mfe_price_before_update = signal.get('mfe_price')
             old_mae_price_before_update = signal.get('mae_price')
             
             mfe_updated, mae_updated = self._update_mfe_mae(signal, current_price, direction)
             
-            # MFE/MAE güncellendiyse, signal dict'i güncelle (threshold kontrolü için)
+            # If MFE/MAE updated, update signal dict (for threshold check)
             if mfe_updated:
                 signal['mfe_price'] = current_price
                 signal['mfe_at'] = int(time.time())
@@ -232,41 +232,41 @@ class SignalTracker:
                 signal['mae_price'] = current_price
                 signal['mae_at'] = int(time.time())
             
-            # 3) ALTERNATIVE ENTRY HIT KONTROLÜ
+            # 3) ALTERNATIVE ENTRY HIT CHECK
             self._check_alternative_entry_hit(signal, current_price, direction)
             
-            # 4) FINALİZE KONTROLÜ (KALDIRILDI)
-            # 72 saat kuralı iptal edildi. Sinyal aktifliği sadece Telegram mesajının varlığına bağlı.
+            # 4) FINALIZE CHECK (REMOVED)
+            # 72-hour rule cancelled. Signal activity depends only on Telegram message existence.
             # if self._should_finalize_signal(signal):
             #     final_outcome = self._determine_final_outcome(signal)
             #     self.repository.finalize_signal(signal_id, current_price, final_outcome)
-            #     self.logger.info(f"Sinyal finalized: {signal_id} - {final_outcome}")
+            #     self.logger.info(f"Signal finalized: {signal_id} - {final_outcome}")
             
-            # TP seviyelerini kontrol et
+            # Check TP levels
             tp_hits = self._check_tp_levels(signal, current_price, direction)
             
-            # SL seviyelerini kontrol et
+            # Check SL levels
             sl_hits = self._check_sl_levels(signal, current_price, direction)
             
-            # HİBRİT MESAJ GÜNCELLEME MANTIĞI
-            # 1. Yeni hit kontrolü (öncelikli)
+            # HYBRID MESSAGE UPDATE LOGIC
+            # 1. New hit check (priority)
             has_new_tp_hits = any(tp_hits.values()) if tp_hits else False
             has_new_sl_hits = any(sl_hits.values()) if sl_hits else False
             
-            # 2. MFE/MAE threshold kontrolü
-            # Eski değerleri parametre olarak geç (threshold kontrolü için)
+            # 2. MFE/MAE threshold check
+            # Pass old values as parameters (for threshold check)
             mfe_mae_threshold_crossed = self._check_mfe_mae_threshold_crossed(
                 signal, current_price, direction, mfe_updated, mae_updated,
                 old_mfe_price_before_update, old_mae_price_before_update
             )
             
-            # 3. Hit olmuş sinyaller için zaman aşımı kontrolü (fall-back)
+            # 3. Timeout check for hit signals (fall-back)
             hit_signal_timeout_reached = self._check_hit_signal_timeout(signal)
             
-            # 4. Confidence değişimi kontrolü (bonus)
+            # 4. Confidence change check (bonus)
             confidence_changed = self._check_confidence_change(signal)
             
-            # Mesaj güncelleme koşulu (hibrit)
+            # Message update condition (hybrid)
             should_update = (
                 has_new_tp_hits or 
                 has_new_sl_hits or 
@@ -278,59 +278,59 @@ class SignalTracker:
             if should_update:
                 update_reasons = []
                 if has_new_tp_hits or has_new_sl_hits:
-                    update_reasons.append(f"yeni hit (TP: {has_new_tp_hits}, SL: {has_new_sl_hits})")
+                    update_reasons.append(f"new hit (TP: {has_new_tp_hits}, SL: {has_new_sl_hits})")
                 if mfe_mae_threshold_crossed:
                     update_reasons.append("MFE/MAE threshold")
                 if hit_signal_timeout_reached:
-                    update_reasons.append("hit sinyal timeout")
+                    update_reasons.append("hit signal timeout")
                 if confidence_changed:
-                    update_reasons.append("confidence değişimi")
+                    update_reasons.append("confidence change")
                 
                 self.logger.debug(
-                    f"{symbol} mesaj güncelleme gerekiyor - "
-                    f"Sebepler: {', '.join(update_reasons)}"
+                    f"{symbol} message update required - "
+                    f"Reasons: {', '.join(update_reasons)}"
                 )
-                # Mesajı güncelle (confidence_change içeride hesaplanacak)
+                # Update message (confidence_change will be calculated inside)
                 self._update_telegram_message(signal, tp_hits, sl_hits)
             else:
-                # Güncelleme gerektirmiyor
-                self.logger.debug(f"{symbol} güncelleme gerektirmedi")
+                # Update not required
+                self.logger.debug(f"{symbol} update not required")
                 
         except Exception as e:
-            self.logger.error(f"Sinyal seviye kontrolü hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Signal level check error: {str(e)}", exc_info=True)
     
     def update_message_for_signal(self, signal: Dict) -> None:
         """
-        Sinyal mesajını günceller (signal log değişiklikleri için).
-        TP/SL hit kontrolü yapmaz, sadece mesajı günceller.
+        Updates signal message (for signal log changes).
+        Does not check TP/SL hits, only updates the message.
         
         Args:
-            signal: Sinyal dict (veritabanından gelen, güncel signal_log ile)
+            signal: Signal dict (from database, with current signal_log)
         """
         try:
             signal_id = signal.get('signal_id')
             symbol = signal.get('symbol')
             
             if not all([signal_id, symbol]):
-                self.logger.warning(f"Eksik sinyal bilgisi (mesaj güncelleme): {signal_id}")
+                self.logger.warning(f"Missing signal info (message update): {signal_id}")
                 return
             
-            # Güncel fiyatı al
+            # Get current price
             current_price = self.market_data.get_latest_price(symbol)
             if not current_price:
-                self.logger.warning(f"{symbol} güncel fiyat alınamadı (mesaj güncelleme)")
+                self.logger.warning(f"{symbol} current price could not be obtained (message update)")
                 return
             
-            # TP/SL hit durumlarını kontrol et (ama hit olmasa bile mesajı güncelle)
+            # Check TP/SL hit statuses (but update message even if not hit)
             tp_hits = self._check_tp_levels(signal, current_price, signal.get('direction', 'LONG'))
             sl_hits = self._check_sl_levels(signal, current_price, signal.get('direction', 'LONG'))
             
-            # Mesajı güncelle (hit olmasa bile - buton ile manuel güncelleme için)
-            # confidence_change içeride hesaplanacak
+            # Update message (even if not hit - for manual update with button)
+            # confidence_change will be calculated inside
             self._update_telegram_message(signal, tp_hits, sl_hits)
                 
         except Exception as e:
-            self.logger.error(f"Sinyal mesaj güncelleme hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Signal message update error: {str(e)}", exc_info=True)
     
     def _check_tp_levels(
         self,
@@ -339,19 +339,19 @@ class SignalTracker:
         direction: str
     ) -> Dict[int, bool]:
         """
-        TP seviyelerini kontrol eder.
+        Checks TP levels.
         
         Args:
-            signal: Sinyal dict
-            current_price: Güncel fiyat
+            signal: Signal dict
+            current_price: Current price
             direction: LONG/SHORT
             
         Returns:
-            TP hit durumları {1: True/False, 2: True/False}
+            TP hit statuses {1: True/False, 2: True/False}
         """
         tp_hits = {}
         
-        # Dengeli yaklaşım: Sadece TP1 ve TP2 kontrol edilir (TP3 kaldırıldı)
+        # Balanced approach: Only TP1 and TP2 are checked (TP3 removed)
         for tp_level in [1, 2]:
             tp_price_key = f'tp{tp_level}_price'
             tp_hit_key = f'tp{tp_level}_hit'
@@ -366,21 +366,21 @@ class SignalTracker:
             price_diff = self._calculate_price_difference(tp_price, current_price, direction, is_tp=True)
             remaining_pct = self._calculate_percentage_to_target(tp_price, current_price, direction, is_tp=True)
             self.logger.debug(
-                "%s TP%d kontrolü: hedef=%.6f mevcut=%.6f fiyat_farkı=%s kalan_yüzde=%s durum=%s",
+                "%s TP%d check: target=%.6f current=%.6f price_diff=%s remaining_pct=%s status=%s",
                 signal.get('signal_id', 'unknown'),
                 tp_level,
                 tp_price,
                 current_price,
                 "N/A" if price_diff is None else f"{price_diff:.6f}",
                 "N/A" if remaining_pct is None else f"{remaining_pct:.2f}%",
-                "HIT" if tp_already_hit else "BEKLEMEDE"
+                "HIT" if tp_already_hit else "PENDING"
             )
 
             if tp_already_hit:
                 tp_hits[tp_level] = False
                 continue
             
-            # Touch kontrolü
+            # Touch check
             if direction == 'LONG':
                 hit = current_price >= tp_price
             elif direction == 'SHORT':
@@ -390,7 +390,7 @@ class SignalTracker:
             
             tp_hits[tp_level] = hit
             
-            # Eğer hit olduysa, veritabanını güncelle
+            # If hit, update database
             if hit:
                 self.repository.update_tp_hit(signal_id=signal['signal_id'], tp_level=tp_level)
                 self.logger.info(
@@ -406,15 +406,15 @@ class SignalTracker:
         direction: str
     ) -> Dict[str, bool]:
         """
-        SL seviyelerini kontrol eder.
+        Checks SL levels.
         
         Args:
-            signal: Sinyal dict
-            current_price: Güncel fiyat
+            signal: Signal dict
+            current_price: Current price
             direction: LONG/SHORT
             
         Returns:
-            SL hit durumu {'sl': True/False}
+            SL hit status {'sl': True/False}
         """
         sl_hits = {'sl': False}
         sl_price = signal.get('sl_price')
@@ -426,19 +426,19 @@ class SignalTracker:
         price_diff = self._calculate_price_difference(sl_price, current_price, direction, is_tp=False)
         remaining_pct = self._calculate_percentage_to_target(sl_price, current_price, direction, is_tp=False)
         self.logger.debug(
-            "%s SL kontrolü: hedef=%.6f mevcut=%.6f fiyat_farkı=%s kalan_yüzde=%s durum=%s",
+            "%s SL check: target=%.6f current=%.6f price_diff=%s remaining_pct=%s status=%s",
             signal.get('signal_id', 'unknown'),
             sl_price,
             current_price,
             "N/A" if price_diff is None else f"{price_diff:.6f}",
             "N/A" if remaining_pct is None else f"{remaining_pct:.2f}%",
-            "HIT" if sl_already_hit else "BEKLEMEDE"
+            "HIT" if sl_already_hit else "PENDING"
         )
 
         if sl_already_hit:
             return sl_hits
         
-        # Touch kontrolü
+        # Touch check
         if direction == 'LONG':
             hit = current_price <= sl_price
         elif direction == 'SHORT':
@@ -464,12 +464,12 @@ class SignalTracker:
         confidence_change: Optional[float] = None
     ) -> None:
         """
-        Telegram mesajını günceller.
+        Updates Telegram message.
         
         Args:
-            signal: Sinyal dict
-            tp_hits: TP hit durumları
-            sl_hits: SL hit durumları
+            signal: Signal dict
+            tp_hits: TP hit statuses
+            sl_hits: SL hit statuses
         """
         try:
             message_id = signal.get('telegram_message_id')
@@ -477,28 +477,28 @@ class SignalTracker:
             symbol = signal.get('symbol')
             
             if not all([message_id, channel_id, symbol]):
-                self.logger.warning(f"Mesaj güncelleme için eksik bilgi: {signal.get('signal_id')}")
+                self.logger.warning(f"Missing info for message update: {signal.get('signal_id')}")
                 return
             
-            # Sinyal verilerini al
+            # Get signal data
             signal_data = signal.get('signal_data', {})
             entry_levels = signal.get('entry_levels', {})
             signal_price = signal.get('signal_price')
             
-            # Güncel fiyatı al
+            # Get current price
             current_price, current_price_ts = self.market_data.get_latest_price_with_timestamp(symbol)
             if not current_price:
                 current_price = signal_price
             if not current_price_ts:
                 current_price_ts = int(time.time())
             
-            # Veritabanından güncel hit durumlarını al
+            # Get current hit statuses from database
             updated_signal = self.repository.get_signal(signal['signal_id'])
             if not updated_signal:
-                self.logger.warning(f"Sinyal bulunamadı: {signal['signal_id']}")
+                self.logger.warning(f"Signal not found: {signal['signal_id']}")
                 return
             
-            # TP hit durumlarını dict'e çevir
+            # Convert TP hit statuses to dict
             tp_hits_dict = {
                 1: updated_signal.get('tp1_hit', 0) == 1,
                 2: updated_signal.get('tp2_hit', 0) == 1
@@ -508,7 +508,7 @@ class SignalTracker:
                 2: updated_signal.get('tp2_hit_at')
             }
             
-            # SL hit durumlarını dict'e çevir
+            # Convert SL hit statuses to dict
             sl_hits_dict = {
                 'sl': updated_signal.get('sl_hit', 0) == 1
             }
@@ -519,34 +519,34 @@ class SignalTracker:
             created_at = updated_signal.get('created_at') or signal.get('created_at')
             signal_id = updated_signal.get('signal_id') or signal.get('signal_id')
             
-            # En son confidence değişikliğini al
+            # Get latest confidence change
             confidence_change = self.repository.get_latest_confidence_change(signal_id)
             
-            # Liquidation Risk Hesaplama (Eksikse)
+            # Liquidation Risk Calculation (If missing)
             if 'liquidation_risk_percentage' not in signal_data and self.liquidation_safety_filter:
                 try:
                     direction = signal.get('direction', 'NEUTRAL')
-                    # SL fiyatını al (custom_targets veya entry_levels'dan)
+                    # Get SL price (from custom_targets or entry_levels)
                     sl_price = None
                     
-                    # 1. Custom Targets kontrolü (Mean Reversion için)
-                    # custom_targets signal_data içinde bulunur (SignalRepository.row_to_dict ile parse edilmiş)
+                    # 1. Custom Targets check (for Mean Reversion)
+                    # custom_targets is in signal_data (parsed by SignalRepository.row_to_dict)
                     custom_targets = signal_data.get('custom_targets', {})
                     # Type safety: Ensure custom_targets is a dict
                     if not isinstance(custom_targets, dict):
                         custom_targets = {}
                     if custom_targets:
-                        # 'sl' veya 'stop_loss' key kontrolü
+                        # Check 'sl' or 'stop_loss' key
                         sl_section = custom_targets.get('sl') or custom_targets.get('stop_loss')
                         if sl_section:
                             sl_price = sl_section.get('stop_loss')
                             if sl_price is None:
                                 sl_price = sl_section.get('price')
                     
-                    # 2. Entry Levels kontrolü (Trend için fallback)
+                    # 2. Entry Levels check (fallback for Trend)
                     if sl_price is None:
-                         # entry_levels yapısını kontrol et
-                         # Genelde: {'sl_price': ...} veya {'conservative': {'sl_price': ...}}
+                         # Check entry_levels structure
+                         # Generally: {'sl_price': ...} or {'conservative': {'sl_price': ...}}
                          sl_price = entry_levels.get('sl_price')
                     
                     if sl_price and signal_price:
@@ -563,7 +563,7 @@ class SignalTracker:
                 except Exception as e:
                     self.logger.warning(f"On-the-fly liquidation risk calculation failed: {e}")
 
-            # Mesajı yeniden formatla
+            # Reformat message
             message = self.formatter.format_signal_alert(
                 symbol=symbol,
                 signal_data=signal_data,
@@ -587,7 +587,7 @@ class SignalTracker:
                 f"signal_data keys={list(signal_data.keys()) if signal_data else 'None'}"
             )
             
-            # Mesajın boş olmadığını kontrol et (Telegram API empty message hatasını önlemek için)
+            # Check if message is not empty (to prevent Telegram API empty message error)
             if not message or not message.strip():
                 self.logger.error(
                     f"Message formatter returned empty message for {symbol} (signal_id: {signal_id}). "
@@ -595,21 +595,21 @@ class SignalTracker:
                 )
                 return
             
-            # Rate limiting: Mesaj güncellemeleri arasında minimum delay
+            # Rate limiting: Minimum delay between message updates
             current_time = time.time()
             time_since_last_update = current_time - self._last_update_time
             if time_since_last_update < self.message_update_delay:
                 sleep_time = self.message_update_delay - time_since_last_update
-                self.logger.debug(f"Rate limiting: {sleep_time:.3f} saniye bekleniyor")
+                self.logger.debug(f"Rate limiting: {sleep_time:.3f} seconds waiting")
                 time.sleep(sleep_time)
             
-            # Mevcut mesajdan keyboard'u almak için mesajı çek
-            # Ama bu ekstra bir API çağrısı gerektirir, bu yüzden
-            # Mesaj güncellenirken keyboard'u korumak için her zaman aynı keyboard'u kullanıyoruz
-            # (SignalScannerManager'da gönderilirken eklenen keyboard)
+            # Fetch message to get keyboard from existing message
+            # But this requires an extra API call, so
+            # We use the same keyboard to preserve it while updating message
+            # (Keyboard added when sending in SignalScannerManager)
             keyboard = self.formatter.create_signal_keyboard(signal_id)
             
-            # Telegram mesajını güncelle (keyboard ile)
+            # Update Telegram message (with keyboard)
             success, message_not_found = self.bot_manager.edit_channel_message(
                 channel_id=channel_id,
                 message_id=message_id,
@@ -617,19 +617,19 @@ class SignalTracker:
                 reply_markup=keyboard
             )
             
-            # Son güncelleme zamanını kaydet
+            # Save last update time
             self._last_update_time = time.time()
             
             if success:
                 self.logger.info(
-                    f"Telegram mesajı güncellendi: {signal['signal_id']} - "
+                    f"Telegram message updated: {signal['signal_id']} - "
                     f"TP hits: {sum(tp_hits_dict.values())}, "
                     f"SL hits: {sum(sl_hits_dict.values())}"
                 )
             elif message_not_found:
-                # Mesaj silinmiş, sinyali aktif takipten çıkar
+                # Message deleted, remove signal from active tracking
                 self.logger.warning(
-                    f"Telegram mesajı silinmiş, sinyal aktif takipten çıkarılıyor: {signal['signal_id']}"
+                    f"Telegram message deleted, removing signal from active tracking: {signal['signal_id']}"
                 )
                 self.repository.mark_message_deleted(signal['signal_id'])
                 
@@ -637,22 +637,22 @@ class SignalTracker:
                 self.logger.info(f"Triggering archival for deleted signal: {signal['signal_id']}")
                 self.archiver.archive_signal(signal['signal_id'])
             else:
-                self.logger.warning(f"Telegram mesajı güncellenemedi: {signal['signal_id']}")
+                self.logger.warning(f"Telegram message could not be updated: {signal['signal_id']}")
                 
         except Exception as e:
             self.logger.error(
-                f"Telegram mesaj güncelleme hatası: {str(e)}",
+                f"Telegram message update error: {str(e)}",
                 exc_info=True
             )
     
     def _update_mfe_mae(self, signal: Dict, current_price: float, direction: str) -> tuple:
         """
-        MFE/MAE hesaplar ve güncellerse True döner.
+        Calculates and updates MFE/MAE, returns True if updated.
         
         Args:
-            signal: Sinyal dict
-            current_price: Güncel fiyat
-            direction: Sinyal yönü
+            signal: Signal dict
+            current_price: Current price
+            direction: Signal direction
             
         Returns:
             (mfe_updated, mae_updated) tuple
@@ -665,20 +665,20 @@ class SignalTracker:
         mae_updated = False
         
         if direction == 'LONG':
-            # MFE: En yüksek fiyat
+            # MFE: Highest price
             if mfe_price is None or current_price > mfe_price:
                 mfe_price = current_price
                 mfe_updated = True
-            # MAE: En düşük fiyat
+            # MAE: Lowest price
             if mae_price is None or current_price < mae_price:
                 mae_price = current_price
                 mae_updated = True
         else:  # SHORT
-            # MFE: En düşük fiyat
+            # MFE: Lowest price
             if mfe_price is None or current_price < mfe_price:
                 mfe_price = current_price
                 mfe_updated = True
-            # MAE: En yüksek fiyat
+            # MAE: Highest price
             if mae_price is None or current_price > mae_price:
                 mae_price = current_price
                 mae_updated = True
@@ -692,7 +692,7 @@ class SignalTracker:
                 mae_at=int(time.time()) if mae_updated else signal.get('mae_at')
             )
             self.logger.debug(
-                f"MFE/MAE güncellendi: {signal_id} - "
+                f"MFE/MAE updated: {signal_id} - "
                 f"MFE: {mfe_price:.6f}, MAE: {mae_price:.6f}"
             )
         
@@ -709,17 +709,17 @@ class SignalTracker:
         old_mae_price: Optional[float] = None
     ) -> bool:
         """
-        MFE/MAE'de anlamlı değişim olup olmadığını kontrol eder.
-        Threshold geçildiyse True döner.
+        Checks if there is a significant change in MFE/MAE.
+        Returns True if threshold is crossed.
         
         Args:
-            signal: Sinyal dict
-            current_price: Güncel fiyat
-            direction: Sinyal yönü
-            mfe_updated: MFE güncellendi mi?
-            mae_updated: MAE güncellendi mi?
-            old_mfe_price: Güncellemeden önceki MFE değeri (opsiyonel)
-            old_mae_price: Güncellemeden önceki MAE değeri (opsiyonel)
+            signal: Signal dict
+            current_price: Current price
+            direction: Signal direction
+            mfe_updated: Is MFE updated?
+            mae_updated: Is MAE updated?
+            old_mfe_price: MFE value before update (optional)
+            old_mae_price: MAE value before update (optional)
             
         Returns:
             True if threshold crossed, False otherwise
@@ -731,24 +731,24 @@ class SignalTracker:
         if not signal_price or signal_price == 0:
             return False
         
-        # Eski değerleri parametre olarak al (güncellemeden önce saklanmış)
-        # Eğer parametre verilmemişse, signal dict'ten oku (fallback)
+        # Take old values as parameters (stored before update)
+        # If parameter not provided, read from signal dict (fallback)
         if old_mfe_price is None:
             old_mfe_price = signal.get('mfe_price')
         if old_mae_price is None:
             old_mae_price = signal.get('mae_price')
         
-        # Eğer MFE/MAE ilk kez set ediliyorsa, güncelleme anlamlı değildir
-        # (İlk değer her zaman set edilir, threshold kontrolü ikinci güncellemeden itibaren)
+        # If MFE/MAE is set for the first time, update is not significant
+        # (First value is always set, threshold check starts from second update)
         if (mfe_updated and old_mfe_price is None) or (mae_updated and old_mae_price is None):
             return False
         
-        # Yeni MFE/MAE değerlerini signal dict'ten al (satır 220-224'te güncellenmiş)
-        # Gereksiz tekrar hesaplama yapmıyoruz, zaten güncellenmiş değerleri kullanıyoruz
+        # Get new MFE/MAE values from signal dict (updated in lines 220-224)
+        # We don't recalculate unnecessarily, we use already updated values
         new_mfe_price = signal.get('mfe_price') if mfe_updated else old_mfe_price
         new_mae_price = signal.get('mae_price') if mae_updated else old_mae_price
         
-        # Threshold kontrolü: Signal price'a göre % değişim
+        # Threshold check: % change relative to Signal price
         if mfe_updated and old_mfe_price is not None and new_mfe_price is not None:
             mfe_change_pct = abs((new_mfe_price - old_mfe_price) / signal_price) * 100
             if mfe_change_pct >= self.mfe_mae_update_threshold_pct:
@@ -763,16 +763,16 @@ class SignalTracker:
     
     def _check_hit_signal_timeout(self, signal: Dict) -> bool:
         """
-        Hit olmuş sinyaller için zaman aşımı kontrolü yapar.
-        En az 2 saatte bir güncelleme yapılmalı.
+        Checks timeout for hit signals.
+        Update should be done at least every 2 hours.
         
         Args:
-            signal: Sinyal dict
+            signal: Signal dict
             
         Returns:
             True if timeout reached, False otherwise
         """
-        # Hit kontrolü
+        # Hit check
         sl_hit = signal.get('sl_hit', 0) == 1
         tp1_hit = signal.get('tp1_hit', 0) == 1
         tp2_hit = signal.get('tp2_hit', 0) == 1
@@ -780,11 +780,11 @@ class SignalTracker:
         if not (sl_hit or tp1_hit or tp2_hit):
             return False
         
-        # Son güncelleme zamanını hit zamanından hesapla
-        # En son hit olan seviyenin zamanını kullan
+        # Calculate last update time from hit time
+        # Use the time of the last hit level
         last_update = None
         
-        # Tüm hit zamanlarını topla ve en sonuncusunu al
+        # Collect all hit times and take the latest one
         hit_times = []
         if sl_hit and signal.get('sl_hit_at'):
             hit_times.append(signal.get('sl_hit_at'))
@@ -794,34 +794,34 @@ class SignalTracker:
             hit_times.append(signal.get('tp2_hit_at'))
         
         if hit_times:
-            # En son hit zamanını al
+            # Get latest hit time
             last_update = max(hit_times)
         else:
-            # Hit zamanı yoksa created_at kullan
+            # If no hit time, use created_at
             last_update = signal.get('created_at', 0)
         
         current_time = int(time.time())
         time_since_update = current_time - (last_update or 0)
         
-        # 2 saat (7200 saniye) geçtiyse güncelle
+        # Update if 2 hours (7200 seconds) passed
         return time_since_update >= self.hit_signal_update_interval
     
     def _check_confidence_change(self, signal: Dict) -> bool:
         """
-        Confidence değerinde anlamlı değişim olup olmadığını kontrol eder.
+        Checks if there is a significant change in confidence value.
         
         Args:
-            signal: Sinyal dict
+            signal: Signal dict
             
         Returns:
             True if confidence changed significantly, False otherwise
         """
-        # Signal log'dan son confidence değişimini al
+        # Get last confidence change from signal log
         signal_log_raw = signal.get('signal_log')
         if not signal_log_raw:
             return False
         
-        # signal_log JSON string olarak saklanıyor, parse et
+        # signal_log is stored as JSON string, parse it
         try:
             import json
             if isinstance(signal_log_raw, str):
@@ -836,7 +836,7 @@ class SignalTracker:
         if not signal_log or not isinstance(signal_log, list):
             return False
         
-        # Son log entry'yi bul
+        # Find last log entry
         last_entry = None
         for entry in reversed(signal_log):
             if entry.get('event_type') == 'new_signal' and 'confidence_change' in entry:
@@ -846,18 +846,18 @@ class SignalTracker:
         if not last_entry:
             return False
         
-        # Confidence değişimi threshold'u geçtiyse True
+        # True if confidence change passed threshold
         confidence_change = abs(last_entry.get('confidence_change', 0))
         return confidence_change >= self.confidence_change_threshold
     
     def _check_alternative_entry_hit(self, signal: Dict, current_price: float, direction: str):
         """
-        optimal/conservative entry fiyatlarına ulaşılmışsa kaydet.
+        Record if optimal/conservative entry prices are reached.
         
         Args:
-            signal: Sinyal dict
-            current_price: Güncel fiyat
-            direction: Sinyal yönü
+            signal: Signal dict
+            current_price: Current price
+            direction: Signal direction
         """
         signal_id = signal['signal_id']
         optimal_entry = signal.get('optimal_entry_price')
@@ -888,8 +888,8 @@ class SignalTracker:
         Returns:
             True ise kapatılmalı (sadece 72 saat geçtiyse)
         """
-        # Sadece 72 saat kontrolü yap
-        # TP/SL hit durumları finalize sebebi değildir (kullanıcı manuel yönetim yapabilir)
+        # Only check 72 hours
+        # TP/SL hit statuses are not finalization reasons (user might manage manually)
         created_at = signal.get('created_at', 0)
         if int(time.time()) - created_at > 72 * 3600:
             return True
@@ -897,10 +897,10 @@ class SignalTracker:
     
     def _determine_final_outcome(self, signal: Dict) -> str:
         """
-        final_outcome değeri belirler.
+        Determines final_outcome value.
         
         Args:
-            signal: Sinyal dict
+            signal: Signal dict
             
         Returns:
             Final outcome string
@@ -915,14 +915,14 @@ class SignalTracker:
 
     def check_messages_existence(self, active_signals: list) -> None:
         """
-        Aktif sinyallerin Telegram mesajlarının hala var olup olmadığını kontrol eder.
-        Eğer mesaj silinmişse, sinyali arşivler.
+        Checks if Telegram messages of active signals still exist.
+        If message is deleted, archives the signal.
         """
         current_time = time.time()
         if current_time - self._last_message_check_time < self.message_check_interval:
             return
 
-        self.logger.info("Heartbeat: Mesaj varlık kontrolü başlatılıyor...")
+        self.logger.info("Heartbeat: Message existence check starting...")
         
         for signal in active_signals:
             try:
@@ -933,7 +933,7 @@ class SignalTracker:
                 if not all([signal_id, channel_id, message_id]):
                     continue
                     
-                # Mesajın varlığını kontrol et (sadece reply_markup güncelleyerek)
+                # Check message existence (only by updating reply_markup)
                 keyboard = self.formatter.create_signal_keyboard(signal_id)
                 exists, message_not_found = self.bot_manager.check_message_exists(
                     channel_id=channel_id,
@@ -942,27 +942,27 @@ class SignalTracker:
                 )
                 
                 if message_not_found:
-                    self.logger.warning(f"Heartbeat: Mesaj silinmiş, arşivleniyor: {signal_id}")
+                    self.logger.warning(f"Heartbeat: Message deleted, archiving: {signal_id}")
                     self.repository.mark_message_deleted(signal_id)
                     self.archiver.archive_signal(signal_id)
                     
             except Exception as e:
-                self.logger.error(f"Heartbeat hatası ({signal_id}): {str(e)}")
+                self.logger.error(f"Heartbeat error ({signal_id}): {str(e)}")
         
         self._last_message_check_time = current_time
-        self.logger.info("Heartbeat: Kontrol tamamlandı.")
+        self.logger.info("Heartbeat: Check completed.")
     
     def archive_deleted_signals(self) -> None:
         """
-        message_deleted=1 olan sinyalleri kontrol eder ve arşivler.
-        Her 10 dakikada bir çalışır.
+        Checks and archives signals with message_deleted=1.
+        Runs every 10 minutes.
         """
         current_time = time.time()
         if current_time - self._last_archive_check_time < self.archive_check_interval:
             return
         
         try:
-            # message_deleted=1 olan sinyalleri getir
+            # Get signals with message_deleted=1
             with self.repository.db.get_db_context() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -973,25 +973,25 @@ class SignalTracker:
                 deleted_signals = [row['signal_id'] for row in cursor.fetchall()]
             
             if not deleted_signals:
-                self.logger.debug("Arşivlenecek silinmiş sinyal yok")
+                self.logger.debug("No deleted signals to archive")
                 self._last_archive_check_time = current_time
                 return
             
-            self.logger.info(f"Arşiv kontrolü: {len(deleted_signals)} silinmiş sinyal bulundu, arşivleniyor...")
+            self.logger.info(f"Archive check: {len(deleted_signals)} deleted signals found, archiving...")
             
             archived_count = 0
             for signal_id in deleted_signals:
                 try:
                     if self.archiver.archive_signal(signal_id):
                         archived_count += 1
-                        self.logger.info(f"Arşivlendi: {signal_id}")
+                        self.logger.info(f"Archived: {signal_id}")
                     else:
-                        self.logger.warning(f"Arşivlenemedi: {signal_id}")
+                        self.logger.warning(f"Could not archive: {signal_id}")
                 except Exception as e:
-                    self.logger.error(f"Arşivleme hatası ({signal_id}): {str(e)}", exc_info=True)
+                    self.logger.error(f"Archiving error ({signal_id}): {str(e)}", exc_info=True)
             
-            self.logger.info(f"Arşiv kontrolü tamamlandı: {archived_count}/{len(deleted_signals)} sinyal arşivlendi")
+            self.logger.info(f"Archive check completed: {archived_count}/{len(deleted_signals)} signals archived")
             self._last_archive_check_time = current_time
             
         except Exception as e:
-            self.logger.error(f"Arşiv kontrolü hatası: {str(e)}", exc_info=True)
+            self.logger.error(f"Archive check error: {str(e)}", exc_info=True)

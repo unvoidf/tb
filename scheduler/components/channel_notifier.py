@@ -1,6 +1,6 @@
 """
-ChannelNotifier: Kanal mesajı gönderen bileşen.
-Saatlik analiz sonuçlarını kanala gönderir.
+ChannelNotifier: Channel message sending component.
+Sends hourly analysis results to the channel.
 """
 from typing import List, Dict
 import asyncio
@@ -12,11 +12,11 @@ from config.config_manager import ConfigManager
 
 
 class ChannelNotifier:
-    """Kanal mesajı gönderen bileşen."""
+    """Channel message sending component."""
     
     def __init__(self, bot_manager: TelegramBotManager, formatter: MessageFormatter, market_data):
         """
-        ChannelNotifier'ı başlatır.
+        Initializes ChannelNotifier.
         
         Args:
             bot_manager: Telegram bot manager
@@ -31,66 +31,66 @@ class ChannelNotifier:
     
     def send_hourly_analysis(self, top_signals: List[Dict], channel_id: str) -> bool:
         """
-        Saatlik analiz sonuçlarını kanala gönderir.
+        Sends hourly analysis results to the channel.
         
         Args:
-            top_signals: Top sinyal listesi
-            channel_id: Telegram kanal ID
+            top_signals: List of top signals
+            channel_id: Telegram channel ID
             
         Returns:
-            Gönderim başarılı mı
+            Is sending successful
         """
         try:
-            # Mesaj formatla
+            # Format message
             message = self._format_hourly_message(top_signals)
             
-            # Mesajı gönder
+            # Send message
             self._send_channel_message_sync(message, channel_id)
             
             self.logger.info(
-                f"Saatlik analiz tamamlandı - {len(top_signals)} sinyal gönderildi"
+                f"Hourly analysis completed - {len(top_signals)} signals sent"
             )
             return True
             
         except Exception as e:
-            self.logger.error(f"Kanal mesajı gönderilemedi: {str(e)}")
-            # Admin'lere bildir
+            self.logger.error(f"Channel message could not be sent: {str(e)}")
+            # Notify admins
             self._notify_admins_about_error(e, top_signals)
             return False
     
     def _format_hourly_message(self, top_signals: List[Dict]) -> str:
         """
-        Saatlik mesaj formatlar.
+        Formats hourly message.
         
         Args:
-            top_signals: Top sinyal listesi
+            top_signals: List of top signals
             
         Returns:
-            Formatlanmış mesaj
+            Formatted message
         """
         from datetime import datetime
         
         header = (
-            "⏰ SAATLİK PİYASA ANALİZİ\n"
+            "⏰ HOURLY MARKET ANALYSIS\n"
             f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
         )
         
         summary = self.formatter.format_trend_summary_with_prices(top_signals, self.market_data)
         
         footer = (
-            "\n💡 Detaylı analiz için: /analiz [COIN]\n"
-            "Örnek: /analiz BTC"
+            "\n💡 For detailed analysis: /analyze [COIN]\n"
+            "Example: /analyze BTC"
         )
         
         return header + summary + footer
     
     def _send_channel_message_sync(self, message: str, channel_id: str) -> None:
         """
-        Kanal mesajını senkron context'ten gönderir.
+        Sends channel message from sync context.
         
         Args:
-            message: Gönderilecek mesaj
-            channel_id: Kanal ID
+            message: Message to send
+            channel_id: Channel ID
         """
         nest_asyncio.apply()
         
@@ -103,34 +103,34 @@ class ChannelNotifier:
     
     def _notify_admins_about_error(self, error: Exception, top_signals: List[Dict]) -> None:
         """
-        Kanal mesajı başarısız olduğunda admin'lere bildirim gönderir.
+        Sends notification to admins when channel message fails.
         
         Args:
-            error: Oluşan hata
-            top_signals: Gönderilmeye çalışılan sinyaller
+            error: Error occurred
+            top_signals: Signals attempted to send
         """
         try:
             error_notification = (
-                "⚠️ KANAL MESAJI GÖNDERİLEMEDİ\n\n"
-                f"Hata: {str(error)}\n\n"
-                "Olası Nedenler:\n"
-                "• Bot kanala admin olarak eklenmemiş\n"
-                "• Kanal ID yanlış\n"
-                "• Bot'un mesaj gönderme yetkisi yok\n\n"
-                "Çözüm:\n"
-                "1. Botunuzu kanala admin olarak ekleyin\n"
-                "2. 'Post Messages' yetkisini verin\n"
-                "3. Kanal ID'yi kontrol edin (.env dosyası)\n\n"
-                f"📊 Gönderilmeye Çalışılan Sinyal Sayısı: {len(top_signals)}"
+                "⚠️ CHANNEL MESSAGE FAILED\n\n"
+                f"Error: {str(error)}\n\n"
+                "Possible Causes:\n"
+                "• Bot not added as admin to channel\n"
+                "• Incorrect Channel ID\n"
+                "• Bot lacks message sending permission\n\n"
+                "Solution:\n"
+                "1. Add bot as admin to channel\n"
+                "2. Grant 'Post Messages' permission\n"
+                "3. Check Channel ID (.env file)\n\n"
+                f"📊 Number of Signals Attempted: {len(top_signals)}"
             )
             
-            # Admin kullanıcılara gönder
+            # Send to admin users
             admin_users = self.config.admin_user_ids
             
             if not admin_users:
                 self.logger.warning(
-                    "Admin user ID tanımlı değil - "
-                    "ADMIN_USER_IDS .env'ye ekleyin"
+                    "Admin user ID not defined - "
+                    "Add ADMIN_USER_IDS to .env"
                 )
                 return
             
@@ -145,10 +145,10 @@ class ChannelNotifier:
                         )
                     )
                     
-                    self.logger.info(f"Error bildirimi gönderildi: User {user_id}")
+                    self.logger.info(f"Error notification sent: User {user_id}")
                 except Exception as notify_error:
                     self.logger.error(
-                        f"User {user_id}'ye bildirim gönderilemedi: {str(notify_error)}"
+                        f"Could not send notification to User {user_id}: {str(notify_error)}"
                     )
         except Exception as e:
-            self.logger.error(f"Admin bildirimi sırasında hata: {str(e)}", exc_info=True)
+            self.logger.error(f"Error during admin notification: {str(e)}", exc_info=True)

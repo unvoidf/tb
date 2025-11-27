@@ -155,7 +155,7 @@ class SignalPerformanceAnalyzer:
                 try:
                     ctx = json.loads(row['market_context']) if isinstance(row['market_context'], str) else row['market_context']
                     market_contexts.append(ctx)
-                except:
+                except (json.JSONDecodeError, TypeError) as e:
                     pass
         
         if not market_contexts:
