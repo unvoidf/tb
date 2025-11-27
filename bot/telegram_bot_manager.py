@@ -402,6 +402,18 @@ class TelegramBotManager:
             # Fallback for old format
             return (bool(result), False)
         except Exception as e:
+            error_message = str(e).lower()
+            is_message_not_found = (
+                "message to edit not found" in error_message or
+                "message not found" in error_message
+            )
+            
+            if is_message_not_found:
+                self.logger.warning(
+                    f"Telegram message not found (sync check): Message ID: {message_id}"
+                )
+                return (False, True)
+            
             self.logger.error(f"Channel message could not be edited (sync): {str(e)}", exc_info=True)
             return (False, False)
     
@@ -572,11 +584,9 @@ class TelegramBotManager:
             self.logger.error("Telegram bot loop call timed out")
             return None
         except Exception as exc:
-            self.logger.error(
-                f"Telegram bot loop call failed: {exc}",
-                exc_info=True
-            )
-            return None
+            # Re-raise exception to be handled by caller (e.g. edit_channel_message)
+            # This allows handling specific errors like "Message to edit not found"
+            raise exc
 
     def initialize(self) -> None:
         """Initializes the bot."""
