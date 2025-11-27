@@ -45,7 +45,9 @@ class SignalTracker:
         self.logger = LoggerManager().get_logger('SignalTracker')
         self._last_update_time = 0.0
         self._last_message_check_time = 0.0
+        self._last_archive_check_time = 0.0
         self.message_check_interval = 600  # 10 minutes
+        self.archive_check_interval = 600  # 10 minutes
         
         # Mesaj güncelleme kontrolü için threshold'lar
         self.mfe_mae_update_threshold_pct = 2.0  # MFE/MAE %2 değişiminde güncelle
@@ -175,6 +177,9 @@ class SignalTracker:
             
             # Periyodik mesaj kontrolü (Heartbeat)
             self.check_messages_existence(active_signals)
+            
+            # Periyodik arşiv kontrolü (message_deleted=1 olan sinyalleri arşivle)
+            self.archive_deleted_signals()
                     
         except Exception as e:
             self.logger.error(f"Aktif sinyal kontrolü hatası: {str(e)}", exc_info=True)
@@ -946,3 +951,47 @@ class SignalTracker:
         
         self._last_message_check_time = current_time
         self.logger.info("Heartbeat: Kontrol tamamlandı.")
+    
+    def archive_deleted_signals(self) -> None:
+        """
+        message_deleted=1 olan sinyalleri kontrol eder ve arşivler.
+        Her 10 dakikada bir çalışır.
+        """
+        current_time = time.time()
+        if current_time - self._last_archive_check_time < self.archive_check_interval:
+            return
+        
+        try:
+            # message_deleted=1 olan sinyalleri getir
+            with self.repository.db.get_db_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT signal_id FROM signals
+                    WHERE message_deleted = 1
+                    ORDER BY created_at DESC
+                """)
+                deleted_signals = [row['signal_id'] for row in cursor.fetchall()]
+            
+            if not deleted_signals:
+                self.logger.debug("Arşivlenecek silinmiş sinyal yok")
+                self._last_archive_check_time = current_time
+                return
+            
+            self.logger.info(f"Arşiv kontrolü: {len(deleted_signals)} silinmiş sinyal bulundu, arşivleniyor...")
+            
+            archived_count = 0
+            for signal_id in deleted_signals:
+                try:
+                    if self.archiver.archive_signal(signal_id):
+                        archived_count += 1
+                        self.logger.info(f"Arşivlendi: {signal_id}")
+                    else:
+                        self.logger.warning(f"Arşivlenemedi: {signal_id}")
+                except Exception as e:
+                    self.logger.error(f"Arşivleme hatası ({signal_id}): {str(e)}", exc_info=True)
+            
+            self.logger.info(f"Arşiv kontrolü tamamlandı: {archived_count}/{len(deleted_signals)} sinyal arşivlendi")
+            self._last_archive_check_time = current_time
+            
+        except Exception as e:
+            self.logger.error(f"Arşiv kontrolü hatası: {str(e)}", exc_info=True)

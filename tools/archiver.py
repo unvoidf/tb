@@ -40,6 +40,7 @@ class SignalArchiver:
     def archive_signal(self, signal_id: str) -> bool:
         """
         Archives a single signal and its snapshots to Parquet, then deletes from SQLite.
+        Only archives signals with message_deleted=1 to prevent archiving active signals.
         
         Args:
             signal_id: The ID of the signal to archive.
@@ -56,12 +57,21 @@ class SignalArchiver:
             if not signal_data:
                 self.logger.warning(f"Signal not found for archival: {signal_id}")
                 return False
+            
+            # 2. Verify message_deleted=1 (safety check)
+            message_deleted = signal_data.get('message_deleted', 0)
+            if message_deleted != 1:
+                self.logger.warning(
+                    f"Signal {signal_id} has message_deleted={message_deleted}, "
+                    f"not archiving (only message_deleted=1 signals should be archived)"
+                )
+                return False
                 
-            # 2. Determine Partition (Month)
+            # 3. Determine Partition (Month)
             created_at = signal_data.get('created_at', 0)
             date_str = datetime.fromtimestamp(created_at).strftime('%Y-%m')
             
-            # 3. Write to Parquet (Append mode)
+            # 4. Write to Parquet (Append mode)
             signals_file = os.path.join(self.signals_archive_dir, f"{date_str}.parquet")
             snapshots_file = os.path.join(self.snapshots_archive_dir, f"{date_str}.parquet")
             
@@ -76,7 +86,7 @@ class SignalArchiver:
             if not df_snapshots.empty:
                 self._append_to_parquet(df_snapshots, snapshots_file)
                 
-            # 4. Verify & Delete (Atomic-like)
+            # 5. Verify & Delete (Atomic-like)
             # We assume if _append_to_parquet didn't raise exception, it's safe.
             # Ideally, we could check file size or read back, but for now we trust the write.
             
@@ -166,17 +176,85 @@ class SignalArchiver:
         table = pa.Table.from_pandas(df)
         
         if os.path.exists(path):
-            # Read existing schema to ensure compatibility or just append
-            # For simplicity in this version, we read existing, concat, and write back.
-            # This is not efficient for HUGE files, but fine for monthly archives of this scale.
-            # A better way is using fastparquet's append or pyarrow's dataset API, 
-            # but reading/writing ensures schema consistency and deduplication if needed.
-            
+            # Read existing table
             existing_table = pq.read_table(path)
-            combined_table = pa.concat_tables([existing_table, table])
+            existing_df = existing_table.to_pandas()
+            
+            # Convert all object columns to string in both dataframes
+            for col in existing_df.columns:
+                if existing_df[col].dtype == 'object':
+                    existing_df[col] = existing_df[col].astype(str)
+            for col in df.columns:
+                if df[col].dtype == 'object':
+                    df[col] = df[col].astype(str)
+            
+            # Merge dataframes
+            combined_df = pd.concat([existing_df, df], ignore_index=True)
+            
+            # Remove duplicates if any (based on signal_id)
+            if 'signal_id' in combined_df.columns:
+                combined_df = combined_df.drop_duplicates(subset=['signal_id'], keep='last')
+            
+            # Convert all columns to string for consistency (parquet schema compatibility)
+            for col in combined_df.columns:
+                combined_df[col] = combined_df[col].astype(str)
+            
+            # Convert back to parquet
+            combined_table = pa.Table.from_pandas(combined_df)
             pq.write_table(combined_table, path)
         else:
             pq.write_table(table, path)
+    
+    def _unify_schemas(self, schema1: pa.Schema, schema2: pa.Schema) -> pa.Schema:
+        """
+        Unifies two schemas by promoting types to be compatible.
+        Returns a schema that can hold data from both input schemas.
+        """
+        unified_fields = []
+        
+        # Get all field names from both schemas
+        all_field_names = set(schema1.names) | set(schema2.names)
+        
+        for field_name in all_field_names:
+            field1 = schema1.field(field_name) if field_name in schema1.names else None
+            field2 = schema2.field(field_name) if field_name in schema2.names else None
+            
+            if field1 and field2:
+                # Both schemas have this field - unify types
+                unified_type = self._unify_types(field1.type, field2.type)
+                unified_fields.append(pa.field(field_name, unified_type))
+            elif field1:
+                unified_fields.append(field1)
+            elif field2:
+                unified_fields.append(field2)
+        
+        return pa.schema(unified_fields)
+    
+    def _unify_types(self, type1: pa.DataType, type2: pa.DataType) -> pa.DataType:
+        """
+        Unifies two PyArrow types by promoting to a compatible type.
+        """
+        # If types are the same, return as is
+        if type1 == type2:
+            return type1
+        
+        # Convert both to string if one is string (most flexible)
+        if pa.types.is_string(type1) or pa.types.is_string(type2):
+            return pa.string()
+        
+        # If one is int64 and other is string, promote to string
+        if (pa.types.is_integer(type1) and pa.types.is_string(type2)) or \
+           (pa.types.is_string(type1) and pa.types.is_integer(type2)):
+            return pa.string()
+        
+        # If both are numeric, promote to the larger type
+        if pa.types.is_integer(type1) and pa.types.is_integer(type2):
+            return pa.int64()
+        if pa.types.is_floating(type1) and pa.types.is_floating(type2):
+            return pa.float64()
+        
+        # Default: promote to string (safest option)
+        return pa.string()
 
     def _delete_from_sqlite(self, signal_id: str):
         """Deletes signal and snapshots from SQLite."""

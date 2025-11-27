@@ -2,7 +2,7 @@
 """
 Historical Simulator for TrendBot (Event-Driven) v2
 ------------------------------------------------
-Replays past signals from signals.db to simulate portfolio performance.
+Replays past signals from parquet archive files to simulate portfolio performance.
 Uses a strict chronological event stream (Entry -> Exit) to manage margin and PnL.
 Implements ISOLATED MARGIN logic with Liquidation checks.
 

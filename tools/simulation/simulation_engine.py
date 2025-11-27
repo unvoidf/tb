@@ -32,7 +32,7 @@ class SimulationEngine:
         mmr: float = DEFAULT_MAINTENANCE_MARGIN_RATE,
         entry_strategy: str = 'immediate',
         min_sl_liq_buffer: Optional[float] = None,
-        db_path: str = "data/signals.db"
+        archive_dir: str = "data/archive/signals"
     ):
         self.initial_balance = initial_balance
         self.risk_per_trade = risk_per_trade
@@ -42,7 +42,7 @@ class SimulationEngine:
         self.entry_strategy = entry_strategy
         self.min_sl_liq_buffer = min_sl_liq_buffer or self._load_min_sl_liq_buffer()
         
-        self.db_manager = DatabaseManager(db_path)
+        self.db_manager = DatabaseManager(archive_dir)
         self.portfolio: Optional[Portfolio] = None
         self.report_generator: Optional[ReportGenerator] = None
         self.notification_manager: Optional[NotificationManager] = None
